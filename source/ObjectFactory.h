@@ -3,11 +3,9 @@
 
 #include "ObjectDesc.h"
 #include "Property.h"
-#include "Serializable.h"
 #include "TempContainer.h"
 
 #include <string>
-#include <map>
 #include <unordered_map>
 #include <cassert>
 #include <memory>
@@ -56,7 +54,7 @@ public:
 
 	const ObjectDesc& GetObjectDesc(const std::string& objectName)
 	{
-		using map_value = std::map<uintptr_t, ObjectDesc>::value_type;
+		using map_value = std::unordered_map<uintptr_t, ObjectDesc>::value_type;
 		auto findResult = std::find_if(m_descs.begin(), m_descs.end(), [&objectName](const map_value& value)
 		{
 			return value.second.GetName() == objectName;
@@ -84,7 +82,7 @@ public:
 	TempContainer& GetTempContainer() { return m_tempContainer; }
 
 private:
-    std::map<uintptr_t, ObjectDesc> m_descs;
+    std::unordered_map<uintptr_t, ObjectDesc> m_descs;
 	TempContainer m_tempContainer;
 };
 

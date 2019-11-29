@@ -33,8 +33,6 @@ private:
 };
 
 
-///////////////////////////////////////////////////////////////////////////////////////////
-
 template<typename ObjectType, typename FieldType>
 class FieldProperty : public Property
 {
@@ -61,7 +59,6 @@ private:
 	MemberAssigner<ClassField<ObjectType, FieldType>> m_assigner;
 };
 
-///////////////////////////////////////////////////////////////////////////////////////////
 
 template<typename ObjectType, typename ReturnType, typename SetType>
 class AccessorProperty : public Property

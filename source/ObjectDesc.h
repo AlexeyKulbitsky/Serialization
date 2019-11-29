@@ -4,7 +4,7 @@
 #include "Property.h"
 
 #include <string>
-#include <map>
+#include <unordered_map>
 #include <cassert>
 
 class ConcreteObjectFactory
@@ -58,7 +58,7 @@ public:
 	}
 
 	template<typename ObjectType, typename ReturnType, typename SetType>
-	ObjectDesc& AddProperty(const std::string& name, ReturnType(ObjectType::* getter)(), void (ObjectType::* setter)(SetType))
+	ObjectDesc& AddProperty(const std::string& name, ReturnType(ObjectType::* getter)(), void (ObjectType::* setter)(SetType) = nullptr)
 	{
 		auto findResult = m_properties.find(name);
 		assert(findResult == m_properties.end());
@@ -69,7 +69,7 @@ public:
 	}
 
 	template<typename ObjectType, typename ReturnType, typename SetType>
-	ObjectDesc& AddProperty(const std::string& name, ReturnType(ObjectType::* getter)() const, void (ObjectType::* setter)(SetType))
+	ObjectDesc& AddProperty(const std::string& name, ReturnType(ObjectType::* getter)() const, void (ObjectType::* setter)(SetType) = nullptr)
 	{
 		auto findResult = m_properties.find(name);
 		assert(findResult == m_properties.end());
@@ -79,12 +79,12 @@ public:
 		return *this;
 	}
 
-	const std::map<std::string, Property*>& GetProperties() const { return m_properties; }
+	const std::unordered_map<std::string, Property*>& GetProperties() const { return m_properties; }
 	const std::string& GetName() const { return m_name; }
 
 private:
 	ConcreteObjectFactory* m_factory = nullptr;
-	std::map<std::string, Property*> m_properties;
+	std::unordered_map<std::string, Property*> m_properties;
 	std::string m_name;
 };
 

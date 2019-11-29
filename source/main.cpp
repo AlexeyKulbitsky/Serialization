@@ -1,5 +1,4 @@
 #include "ObjectFactory.h"
-#include "Serializable.h"
 #include "Serializer.h"
 #include "TypeInfo.h"
 
@@ -90,15 +89,40 @@ protected:
 		case TypeInfo::Array:
 		{
 			std::cout << " Type: [Array] Value:" << std::endl;
+
+			size_t elementsCount = 0U;
 			const auto& underlyingTypeInfo = typeInfo.GetUnderlyingType();
-			const size_t elementsCount = typeInfo.GetElementsCount();
-			size_t offset = 0U;
 			char* dataPtr = reinterpret_cast<char*>(data);
-			for (size_t i = 0U; i < elementsCount; ++i)
+
+			switch (typeInfo.GetArrayType())
 			{
-				char* currentDataAddress = dataPtr + i * underlyingTypeInfo->GetElementSize();
-				SerializeByType(*underlyingTypeInfo, reinterpret_cast<void*>(currentDataAddress));
+			case TypeInfo::ArrayType::CStyleArray:
+			{
+				elementsCount = typeInfo.GetElementsCount();
+				for (size_t i = 0U; i < elementsCount; ++i)
+				{
+					char* currentDataAddress = dataPtr + i * underlyingTypeInfo->GetElementSize();
+					SerializeByType(*underlyingTypeInfo, reinterpret_cast<void*>(currentDataAddress));
+				}
 			}
+				break;
+			case TypeInfo::ArrayType::StaticArray:
+				break;
+			case TypeInfo::ArrayType::Vector:
+			{
+				elementsCount = typeInfo.vectorParams.getSize(data);
+				ss.write(reinterpret_cast<char*>(&elementsCount), sizeof(size_t));
+				for (size_t i = 0U; i < elementsCount; ++i)
+				{
+					void* currentDataAddress = typeInfo.vectorParams.getItem(data, i);
+					SerializeByType(*underlyingTypeInfo, currentDataAddress);
+				}
+			}
+				break;
+			default:
+				break;
+			}
+			
 		}
 			break;
 		case TypeInfo::Enum:
@@ -106,6 +130,11 @@ protected:
 			std::cout << "Type [Enum]" << std::endl;
 			int value = *reinterpret_cast<int*>(data);
 			ss.write(reinterpret_cast<char*>(data), sizeof(int));
+		}
+			break;
+		case TypeInfo::Map:
+		{
+
 		}
 			break;
 		default:
@@ -154,14 +183,38 @@ protected:
 		case TypeInfo::Array:
 		{
 			const auto& underlyingTypeInfo = typeInfo.GetUnderlyingType();
-			const size_t elementsCount = typeInfo.GetElementsCount();
-			size_t offset = 0U;
-			char* dataPtr = reinterpret_cast<char*>(data);
-			for (size_t i = 0U; i < elementsCount; ++i)
+			switch (typeInfo.GetArrayType())
 			{
-				char* currentDataAddress = dataPtr + i * underlyingTypeInfo->GetElementSize();
-				DeserializeByType(*underlyingTypeInfo, reinterpret_cast<void*>(currentDataAddress));
+			case TypeInfo::ArrayType::CStyleArray:
+			{
+				const size_t elementsCount = typeInfo.GetElementsCount();
+				size_t offset = 0U;
+				char* dataPtr = reinterpret_cast<char*>(data);
+				for (size_t i = 0U; i < elementsCount; ++i)
+				{
+					char* currentDataAddress = dataPtr + i * underlyingTypeInfo->GetElementSize();
+					DeserializeByType(*underlyingTypeInfo, reinterpret_cast<void*>(currentDataAddress));
+				}
 			}
+				break;
+			case TypeInfo::ArrayType::StaticArray:
+				break;
+			case TypeInfo::ArrayType::Vector:
+			{
+				size_t elementsCount = 0;
+				ss.read(reinterpret_cast<char*>(&elementsCount), sizeof(size_t));
+				typeInfo.vectorParams.setSize(data, elementsCount);
+				for (size_t i = 0U; i < elementsCount; ++i)
+				{
+					void* currentDataAddress = typeInfo.vectorParams.getItem(data, i);
+					DeserializeByType(*underlyingTypeInfo, reinterpret_cast<void*>(currentDataAddress));
+				}
+			}
+				break;
+			default:
+				break;
+			}
+			
 		}
 		break;
 		case TypeInfo::Enum:
@@ -197,12 +250,28 @@ enum class MyEnum
 	Third
 };
 
+
+class BaseClass
+{
+public:
+	int a = 0;
+	int b = 100;
+};
+
+class DerivedClass : public BaseClass
+{
+public:
+	int c = 222;
+};
+
 struct TestStruct
 {
 	int intValue = 5;
 	float floatValue = 7.0f;
 	int someArray[5] = { 1, 4, 5, 8, 9 };
 	int someMatrix[3][3] = { {1, 2, 3}, {3, 3, 3}, {6, 6, 6} };
+	std::vector<int> someVector;
+	std::map<int, float> someMap;
 	Vec3 vec3;
 	Vec2* vec2 = nullptr;
 	MyEnum someEnum;
@@ -214,37 +283,49 @@ struct TestStruct
 
 int main()
 {
-	class_<Vec2>("Vec2")
+	/*class_<Vec2>("Vec2")
 		.AddProperty("x", &Vec2::x)
 		.AddProperty("y", &Vec2::y);
 
 	class_<Vec3>("Vec3")
 		.AddProperty("x", &Vec3::x)
 		.AddProperty("y", &Vec3::y)
-		.AddProperty("z", &Vec3::z);
+		.AddProperty("z", &Vec3::z);*/
 
 	class_<TestStruct>("TestStruct")
-		.AddProperty("intValue", &TestStruct::intValue)
-		.AddProperty("floatValue", &TestStruct::floatValue)
-		.AddProperty("someArray", &TestStruct::someArray)
-		.AddProperty("someMatrix", &TestStruct::someMatrix)
-		.AddProperty("vec3", &TestStruct::vec3)
-		.AddProperty("vec2", &TestStruct::vec2)
-		.AddProperty("someEnum", &TestStruct::someEnum)
-		.AddProperty("Vec3Accessor", &TestStruct::GetVec3, &TestStruct::SetVec3);
+		//.AddProperty("intValue", &TestStruct::intValue)
+		//.AddProperty("floatValue", &TestStruct::floatValue)
+		//.AddProperty("someArray", &TestStruct::someArray)
+		//.AddProperty("someMatrix", &TestStruct::someMatrix)
+		//.AddProperty("someVector", &TestStruct::someVector)
+		//.AddProperty("vec3", &TestStruct::vec3)
+		.AddProperty("someMap", &TestStruct::someMap);
+		//.AddProperty("vec2", &TestStruct::vec2)
+		//.AddProperty("someEnum", &TestStruct::someEnum)
+		//.AddProperty("Vec3Accessor", &TestStruct::GetVec3, &TestStruct::SetVec3)
+		;
+
+	/*class_<BaseClass>("BaseClass")
+		.AddProperty("a", &BaseClass::a)
+		.AddProperty("b", &BaseClass::b);
+
+	class_<DerivedClass>("DerivedClass")
+		.AddProperty("c", &DerivedClass::c);*/
 
 	TestStruct objectToSerialize;
-	objectToSerialize.vec3.x = 1000.0f;
-	objectToSerialize.vec3.y = 335.5f;
-	objectToSerialize.vec3.z = 700.1f;
-	objectToSerialize.someArray[3] = 900;
-	objectToSerialize.someArray[4] = 7788;
-	objectToSerialize.someMatrix[1][1] = 333333;
-	objectToSerialize.someEnum = MyEnum::Second;
-	objectToSerialize.SetVec3(Vec3{ 1.0f, 999.0f, 56.3f });
+	//objectToSerialize.vec3.x = 1000.0f;
+	//objectToSerialize.vec3.y = 335.5f;
+	//objectToSerialize.vec3.z = 700.1f;
+	//objectToSerialize.someArray[3] = 900;
+	//objectToSerialize.someArray[4] = 7788;
+	//objectToSerialize.someMatrix[1][1] = 333333;
+	//objectToSerialize.someEnum = MyEnum::Second;
+	//objectToSerialize.SetVec3(Vec3{ 1.0f, 999.0f, 56.3f });
+	//objectToSerialize.someVector.push_back(100);
+	//objectToSerialize.someVector.push_back(134);
 
     ConsoleSerializer serializer;
-	serializer.Serialize(objectToSerialize);
+ 	serializer.Serialize(objectToSerialize);
 
 	TestStruct objectToDeserialize;
 	serializer.Deserialize(objectToDeserialize);
