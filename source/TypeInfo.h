@@ -48,8 +48,23 @@ public:
 
 	struct MapParams
 	{
+		using SizeGetter = std::function<size_t(void*)>;
+		using IteratorGetter = std::function<void*(void*)>;
+		using KeyGetter = std::function<const void*(void*)>;
+		using ValueGetter = std::function<void*(void*)>;
+		using IteratorValidator = std::function<const bool(void*, void*)>;
+		using IteratorIncrementator = std::function<void(void*)>;
+
 		std::unique_ptr<TypeInfo> keyTypeInfo;
 		std::unique_ptr<TypeInfo> valueTypeInfo;
+
+		SizeGetter getSize;
+		IteratorGetter getIterator;
+		KeyGetter getKey;
+		ValueGetter getValue;
+		IteratorValidator isIteratorValid;
+		IteratorIncrementator incrementIterator;
+
 	} mapParams;
 
 	const Type GetType() const { return m_type; }
@@ -111,8 +126,7 @@ public:
 			m_arrayType = ArrayType::Vector;
 
 			m_elementsCount = 0U;
-			auto typeInfo = std::make_unique<TypeInfo>();
-			m_underlyingType = std::move(typeInfo);
+			m_underlyingType = std::make_unique<TypeInfo>();
 			m_underlyingType->m_type = deducer.underlyingType;
 			m_underlyingType->m_elementSize = deducer.elementSize;
 
@@ -132,6 +146,15 @@ public:
 
 			mapParams.keyTypeInfo->m_type = deducer.keyType;
 			mapParams.valueTypeInfo->m_type = deducer.valueType;
+
+			using KeyType = extract_key_value_from_map<ObjectType>::key_type;
+			using ValueType = extract_key_value_from_map<ObjectType>::value_type;
+			mapParams.getSize = MapSizeGetter<ObjectType>;
+			mapParams.getIterator = MapIteratorGetter<ObjectType>;
+			mapParams.getKey = MapKeyGetter<ObjectType>;
+			mapParams.getValue = MapValueGetter<ObjectType>;
+			mapParams.isIteratorValid = MapIteratorValidator<ObjectType>;
+			mapParams.incrementIterator = MapIteratorIncrementator<ObjectType>;
 		}
 		else if (std::is_class<ObjectType>::value)
 		{
@@ -270,8 +293,27 @@ struct TypeDeducer<std::map<KeyType, ValueType>>
 		valueType = valueTypeDeducer.type;
 	}
 
+	TypeInfo::Type keyType = TypeInfo::Undefined;
+	TypeInfo::Type valueType = TypeInfo::Undefined;
+	TypeInfo::Type underlyingType = TypeInfo::Undefined;
+	size_t elementsCount = 0U;
+	size_t elementSize = 0U;
+};
+
+template<typename KeyType, typename ValueType>
+struct TypeDeducer<std::unordered_map<KeyType, ValueType>>
+{
+	TypeDeducer()
+	{
+		TypeDeducer<KeyType> keyTypeDeducer;
+		TypeDeducer<ValueType> valueTypeDeducer;
+
+		keyType = keyTypeDeducer.type;
+		valueType = valueTypeDeducer.type;
+	}
+
 	TypeInfo::Type type = TypeInfo::Map;
-	
+
 	TypeInfo::Type keyType = TypeInfo::Undefined;
 	TypeInfo::Type valueType = TypeInfo::Undefined;
 

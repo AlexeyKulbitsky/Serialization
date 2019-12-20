@@ -134,7 +134,20 @@ protected:
 			break;
 		case TypeInfo::Map:
 		{
+			size_t elementsCount = typeInfo.mapParams.getSize(data);
+			ss.write(reinterpret_cast<char*>(&elementsCount), sizeof(size_t));
 
+			auto it = typeInfo.mapParams.getIterator(data);
+
+			while (typeInfo.mapParams.isIteratorValid(it, data))
+			{
+				auto key = typeInfo.mapParams.getKey(it);
+				auto value = typeInfo.mapParams.getValue(it);
+				SerializeByType(*typeInfo.mapParams.keyTypeInfo, (void*)key);
+				SerializeByType(*typeInfo.mapParams.valueTypeInfo, value);
+
+				typeInfo.mapParams.incrementIterator(it);
+			}
 		}
 			break;
 		default:
@@ -222,6 +235,19 @@ protected:
 			int value = 0;
 			ss.read(reinterpret_cast<char*>(&value), sizeof(int));
 			*reinterpret_cast<int*>(data) = value;
+		}
+		break;
+		case TypeInfo::Map:
+		{
+			size_t elementsCount = 0;
+			ss.read(reinterpret_cast<char*>(&elementsCount), sizeof(size_t));
+			for (size_t i = 0U; i < elementsCount; ++i)
+			{
+				const size_t keySize = typeInfo.mapParams.keyTypeInfo->GetElementSize();
+
+				int a = 0;
+				a++;
+			}
 		}
 		break;
 		default:
@@ -323,6 +349,11 @@ int main()
 	//objectToSerialize.SetVec3(Vec3{ 1.0f, 999.0f, 56.3f });
 	//objectToSerialize.someVector.push_back(100);
 	//objectToSerialize.someVector.push_back(134);
+
+	objectToSerialize.someMap[16] = 3.0f;
+	objectToSerialize.someMap[27] = 444.4f;
+	auto it = objectToSerialize.someMap.begin();
+	auto endIt = objectToSerialize.someMap.end();
 
     ConsoleSerializer serializer;
  	serializer.Serialize(objectToSerialize);
