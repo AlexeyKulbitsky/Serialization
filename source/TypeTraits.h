@@ -4,6 +4,7 @@
 #include <type_traits>
 #include <string>
 #include <vector>
+#include <array>
 #include <map>
 #include <unordered_map>
 
@@ -51,7 +52,11 @@ struct remove_vector_extent<const std::vector<T>> { using type = T; };
 
 
 template<typename T>
-struct extract_key_value_from_map;
+struct extract_key_value_from_map
+{
+	using key_type = T;
+	using value_type = T;
+};
 
 template<typename Key, typename Value>
 struct extract_key_value_from_map<std::map<Key, Value>>
@@ -98,23 +103,30 @@ void VectorSizeSetter(void* data, const size_t size)
 ////////////////////////////////////////////////////////////////////////////////////////
 
 
-template<typename T>
+/*template<typename T>
 struct MapTypeWrapper;
 
 template<typename Key, typename Value>
 struct MapTypeWrapper<std::map<Key, Value>>
 {
 	using MapType = std::map<Key, Value>;
+	using KeyType = Key;
+	using ValueType = Value;
 };
 
 template<typename Key, typename Value>
 struct MapTypeWrapper<std::unordered_map<Key, Value>>
 {
 	using MapType = std::unordered_map<Key, Value>;
+	using KeyType = Key;
+	using ValueType = Value;
 };
 
 template<typename T>
-const size_t MapSizeGetter(void* data);
+const size_t MapSizeGetter(void* data)
+{
+	return 0;
+}
 
 template<typename T>
 const size_t MapSizeGetter<MapTypeWrapper<T>>(void* data)
@@ -126,7 +138,10 @@ const size_t MapSizeGetter<MapTypeWrapper<T>>(void* data)
 }
 
 template<typename T>
-void* MapIteratorGetter(void* data);
+void* MapIteratorGetter(void* data)
+{
+	return nullptr;
+}
 
 template<typename T>
 void* MapIteratorGetter<MapTypeWrapper<T>>(void* data)
@@ -140,7 +155,10 @@ void* MapIteratorGetter<MapTypeWrapper<T>>(void* data)
 }
 
 template<typename T>
-const void* MapKeyGetter(void* data);
+const void* MapKeyGetter(void* data)
+{
+	return nullptr;
+}
 
 template<typename T>
 const void* MapKeyGetter<MapTypeWrapper<T>>(void* data)
@@ -156,7 +174,10 @@ const void* MapKeyGetter<MapTypeWrapper<T>>(void* data)
 }
 
 template<typename T>
-void* MapValueGetter(void* data);
+void* MapValueGetter(void* data)
+{
+	return nullptr;
+}
 
 template<typename T>
 void* MapValueGetter<MapTypeWrapper<T>>(void* data)
@@ -172,7 +193,10 @@ void* MapValueGetter<MapTypeWrapper<T>>(void* data)
 }
 
 template<typename T>
-const bool MapIteratorValidator(void* iteratorRawPtr, void* mapRawPtr);
+const bool MapIteratorValidator(void* iteratorRawPtr, void* mapRawPtr)
+{
+	return false;
+}
 
 template<typename T>
 const bool MapIteratorValidator<MapTypeWrapper<T>>(void* iteratorRawPtr, void* mapRawPtr)
@@ -189,7 +213,10 @@ const bool MapIteratorValidator<MapTypeWrapper<T>>(void* iteratorRawPtr, void* m
 
 
 template<typename T>
-void MapIteratorIncrementator(void* iteratorRawPtr);
+void MapIteratorIncrementator(void* iteratorRawPtr)
+{
+
+}
 
 template<typename T>
 void MapIteratorIncrementator<MapTypeWrapper<T>>(void* iteratorRawPtr)
@@ -199,6 +226,23 @@ void MapIteratorIncrementator<MapTypeWrapper<T>>(void* iteratorRawPtr)
 	auto itPtr = reinterpret_cast<IteratorType*>(iteratorRawPtr);
 	++(*itPtr);
 }
+
+template<typename T>
+void MapKeyValueSetter(void* map, void* key, void* value) {}
+
+template<typename T>
+void MapKeyValueSetter<MapTypeWrapper<T>>(void* map, void* key, void* value)
+{
+	using MapType = MapTypeWrapper<T>::MapType;
+	using KeyType = MapTypeWrapper<T>::KeyType;
+	using ValueType = MapTypeWrapper<T>::ValueType;
+
+	auto mapPtr = reinterpret_cast<MapType*>(map);
+	auto keyPtr = reinterpret_cast<KeyType*>(key);
+	auto valuePtr = reinterpret_cast<ValueType*>(value);
+
+	(*mapPtr)[(*keyPtr)] = (*valuePtr);
+}*/
 ////////////////////////////////////////////////////////////////////////////////////////
 
 template<typename ObjectType, typename FieldType>

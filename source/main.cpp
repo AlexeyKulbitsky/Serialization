@@ -5,6 +5,7 @@
 #include <iostream>
 #include <sstream>
 
+
 class ConsoleSerializer : public Serializer
 {
 private:
@@ -51,18 +52,11 @@ protected:
 	{
 		switch (typeInfo.GetType())
 		{
-		case TypeInfo::Integral:
+		case TypeInfo::Fundamental:
 		{
-			int value = *reinterpret_cast<int*>(data);
-			std::cout << " Type: [Integral] Value: " << value << std::endl;
-			ss.write(reinterpret_cast<char*>(data), sizeof(int));
-		}
-			break;
-		case TypeInfo::Floating:
-		{
-			float value = *reinterpret_cast<float*>(data);
-			std::cout << " Type: [Floating] Value: " << value << std::endl;
-			ss.write(reinterpret_cast<char*>(data), sizeof(float));
+			const auto typeId = typeInfo.GetTypeId();
+			const auto typeSize = typeInfo.GetElementSize();
+			ss.write(reinterpret_cast<char*>(data), typeSize);
 		}
 			break;
 		case TypeInfo::Class:
@@ -159,18 +153,15 @@ protected:
 	{
 		switch (typeInfo.GetType())
 		{
-		case TypeInfo::Integral:
+		case TypeInfo::Fundamental:
 		{
-			int value = 0;
-			ss.read(reinterpret_cast<char*>(&value), sizeof(int));
-			*reinterpret_cast<int*>(data) = value;
-		}
-		break;
-		case TypeInfo::Floating:
-		{
-			float value = 0;
-			ss.read(reinterpret_cast<char*>(&value), sizeof(float));
-			*reinterpret_cast<float*>(data) = value;
+			const auto typeSize = typeInfo.GetElementSize();
+			char *buffer = new char[typeSize];
+
+			ss.read(buffer, typeSize);
+			std::memcpy(data, buffer, typeSize);
+
+			delete[] buffer;
 		}
 		break;
 		case TypeInfo::Class:
@@ -241,13 +232,22 @@ protected:
 		{
 			size_t elementsCount = 0;
 			ss.read(reinterpret_cast<char*>(&elementsCount), sizeof(size_t));
+			
+			char* keyBuffer = new char[256];
+			char* valueBuffer = new char[256];
+
+			void* keyPtr = reinterpret_cast<void*>(keyBuffer);
+			void* valuePtr = reinterpret_cast<void*>(valueBuffer);
 			for (size_t i = 0U; i < elementsCount; ++i)
 			{
-				const size_t keySize = typeInfo.mapParams.keyTypeInfo->GetElementSize();
+				DeserializeByType(*typeInfo.mapParams.keyTypeInfo, keyPtr);
+				DeserializeByType(*typeInfo.mapParams.valueTypeInfo, valuePtr);
 
-				int a = 0;
-				a++;
+				typeInfo.mapParams.setKeyValue(data, keyPtr, valuePtr);
 			}
+
+			delete[] keyBuffer;
+			delete[] valueBuffer;
 		}
 		break;
 		default:
@@ -319,13 +319,13 @@ int main()
 		.AddProperty("z", &Vec3::z);*/
 
 	class_<TestStruct>("TestStruct")
-		//.AddProperty("intValue", &TestStruct::intValue)
-		//.AddProperty("floatValue", &TestStruct::floatValue)
-		//.AddProperty("someArray", &TestStruct::someArray)
+		.AddProperty("intValue", &TestStruct::intValue)
+		.AddProperty("floatValue", &TestStruct::floatValue)
+		.AddProperty("someArray", &TestStruct::someArray)
 		//.AddProperty("someMatrix", &TestStruct::someMatrix)
 		//.AddProperty("someVector", &TestStruct::someVector)
 		//.AddProperty("vec3", &TestStruct::vec3)
-		.AddProperty("someMap", &TestStruct::someMap);
+		//.AddProperty("someMap", &TestStruct::someMap)
 		//.AddProperty("vec2", &TestStruct::vec2)
 		//.AddProperty("someEnum", &TestStruct::someEnum)
 		//.AddProperty("Vec3Accessor", &TestStruct::GetVec3, &TestStruct::SetVec3)
@@ -339,19 +339,21 @@ int main()
 		.AddProperty("c", &DerivedClass::c);*/
 
 	TestStruct objectToSerialize;
+	objectToSerialize.intValue = 7;
+	objectToSerialize.floatValue = 23.5f;
 	//objectToSerialize.vec3.x = 1000.0f;
 	//objectToSerialize.vec3.y = 335.5f;
 	//objectToSerialize.vec3.z = 700.1f;
-	//objectToSerialize.someArray[3] = 900;
-	//objectToSerialize.someArray[4] = 7788;
+	objectToSerialize.someArray[3] = 900;
+	objectToSerialize.someArray[4] = 7788;
 	//objectToSerialize.someMatrix[1][1] = 333333;
 	//objectToSerialize.someEnum = MyEnum::Second;
 	//objectToSerialize.SetVec3(Vec3{ 1.0f, 999.0f, 56.3f });
 	//objectToSerialize.someVector.push_back(100);
 	//objectToSerialize.someVector.push_back(134);
-
 	objectToSerialize.someMap[16] = 3.0f;
 	objectToSerialize.someMap[27] = 444.4f;
+
 	auto it = objectToSerialize.someMap.begin();
 	auto endIt = objectToSerialize.someMap.end();
 
@@ -360,6 +362,10 @@ int main()
 
 	TestStruct objectToDeserialize;
 	serializer.Deserialize(objectToDeserialize);
+
+
+	auto i = TypeToId(1.f);
+	auto v = IdToType(TypeId_<1>{});
 
     return 0;
 }

@@ -8,13 +8,59 @@
 #include <memory>
 #include <functional>
 
+
+template<size_t index>
+using TypeId_ = std::integral_constant<size_t, index>;
+
+template<typename T>
+constexpr size_t TypeToId(T = T{}) noexcept
+{
+	return 0;
+}
+template<typename T>
+constexpr size_t GetTypeSize(T = T{}) noexcept
+{
+	return 0;
+}
+
+#define REGISTER_BASIC_TYPE(Type, Index, Size)		\
+template<>											\
+constexpr size_t TypeToId<Type>(Type) noexcept		\
+{													\
+	return Index;									\
+}													\
+constexpr Type IdToType(TypeId_<Index>) noexcept	\
+{													\
+	return Type();									\
+}													\
+template<>											\
+constexpr size_t GetTypeSize<Type>(Type) noexcept	\
+{													\
+	return Size;									\
+}
+
+REGISTER_BASIC_TYPE(int, 1, sizeof (int))
+REGISTER_BASIC_TYPE(long int, 2, sizeof(long int))
+REGISTER_BASIC_TYPE(long long int, 3, sizeof(long long int))
+REGISTER_BASIC_TYPE(short, 4, sizeof(short))
+REGISTER_BASIC_TYPE(char, 5, sizeof(char))
+REGISTER_BASIC_TYPE(unsigned int, 6, sizeof(unsigned int))
+REGISTER_BASIC_TYPE(unsigned long int, 7, sizeof(unsigned long int))
+REGISTER_BASIC_TYPE(unsigned long long int, 8, sizeof(unsigned long long int))
+REGISTER_BASIC_TYPE(unsigned short, 9, sizeof(unsigned short))
+REGISTER_BASIC_TYPE(unsigned char, 10, sizeof(unsigned char))
+REGISTER_BASIC_TYPE(float, 11, sizeof(float))
+REGISTER_BASIC_TYPE(double, 12, sizeof(double))
+
+
+
+
 class TypeInfo
 {
 public:
 	enum Type
 	{
-		Integral,
-		Floating,
+		Fundamental,
 		Class,
 		Array,
 		Pointer,
@@ -54,6 +100,7 @@ public:
 		using ValueGetter = std::function<void*(void*)>;
 		using IteratorValidator = std::function<const bool(void*, void*)>;
 		using IteratorIncrementator = std::function<void(void*)>;
+		using KeyValueSetter = std::function<void(void*, void*, void*)>;
 
 		std::unique_ptr<TypeInfo> keyTypeInfo;
 		std::unique_ptr<TypeInfo> valueTypeInfo;
@@ -64,6 +111,7 @@ public:
 		ValueGetter getValue;
 		IteratorValidator isIteratorValid;
 		IteratorIncrementator incrementIterator;
+		KeyValueSetter setKeyValue;
 
 	} mapParams;
 
@@ -73,17 +121,16 @@ public:
 	const ArrayType GetArrayType() const { return m_arrayType; }
 	const size_t GetElementsCount() const { return m_elementsCount; }
 	const size_t GetElementSize() const { return m_elementSize; }
+	const size_t GetTypeId() const { return m_typeIndex; }
 
 	template<typename ObjectType>
 	void Init()
 	{
-		if (std::is_integral<ObjectType>::value)
+		if (std::is_fundamental<ObjectType>::value)
 		{
-			m_type = Integral;
-		}
-		else if (std::is_floating_point<ObjectType>::value)
-		{
-			m_type = Floating;
+			m_typeIndex = TypeToId<ObjectType>();
+			m_elementSize = GetTypeSize<ObjectType>();
+			m_type = Fundamental;
 		}
 		else if (std::is_enum<ObjectType>::value)
 		{
@@ -149,12 +196,13 @@ public:
 
 			using KeyType = extract_key_value_from_map<ObjectType>::key_type;
 			using ValueType = extract_key_value_from_map<ObjectType>::value_type;
-			mapParams.getSize = MapSizeGetter<ObjectType>;
+			/*mapParams.getSize = MapSizeGetter<ObjectType>;
 			mapParams.getIterator = MapIteratorGetter<ObjectType>;
 			mapParams.getKey = MapKeyGetter<ObjectType>;
 			mapParams.getValue = MapValueGetter<ObjectType>;
 			mapParams.isIteratorValid = MapIteratorValidator<ObjectType>;
 			mapParams.incrementIterator = MapIteratorIncrementator<ObjectType>;
+			mapParams.setKeyValue = MapKeyValueSetter<ObjectType>;*/
 		}
 		else if (std::is_class<ObjectType>::value)
 		{
@@ -167,8 +215,6 @@ public:
 		}
 	}
 
-	
-
 private:
 	Type m_type = Type::Undefined;
 	ArrayType m_arrayType = ArrayType::Undefined;
@@ -176,6 +222,7 @@ private:
 	size_t m_elementsCount = 0U;
 	size_t m_elementSize = 0U;
 	std::unique_ptr<TypeInfo> m_underlyingType;
+	size_t m_typeIndex = 0U;
 };
 
 template<typename ObjectType>
@@ -183,13 +230,9 @@ struct TypeDeducer
 {
 	TypeDeducer()
 	{
-		if (std::is_integral<ObjectType>::value)
+		if (std::is_fundamental<ObjectType>::value)
 		{
-			type = TypeInfo::Integral;
-		}
-		else if (std::is_floating_point<ObjectType>::value)
-		{
-			type = TypeInfo::Floating;
+			type = TypeInfo::Fundamental;
 		}
 		else if (std::is_class<ObjectType>::value)
 		{
@@ -201,6 +244,8 @@ struct TypeDeducer
 		}
 	}
 
+	TypeInfo::Type keyType = TypeInfo::Undefined;
+	TypeInfo::Type valueType = TypeInfo::Undefined;
 	TypeInfo::Type type = TypeInfo::Undefined;
 	TypeInfo::Type underlyingType = TypeInfo::Undefined;
 	size_t elementsCount = 0U;
@@ -214,13 +259,9 @@ struct TypeDeducer<ObjectType[N]>
 	{
 		elementsCount = N;
 		elementSize = sizeof(ObjectType);
-		if (std::is_integral<ObjectType>::value)
+		if (std::is_fundamental<ObjectType>::value)
 		{
-			underlyingType = TypeInfo::Integral;
-		}
-		else if (std::is_floating_point<ObjectType>::value)
-		{
-			underlyingType = TypeInfo::Floating;
+			underlyingType = TypeInfo::Fundamental;
 		}
 		else if (std::is_class<ObjectType>::value)
 		{
@@ -237,6 +278,8 @@ struct TypeDeducer<ObjectType[N]>
 		}
 	}
 
+	TypeInfo::Type keyType = TypeInfo::Undefined;
+	TypeInfo::Type valueType = TypeInfo::Undefined;
 	TypeInfo::Type type = TypeInfo::Array;
 	TypeInfo::Type underlyingType = TypeInfo::Undefined;
 	size_t elementsCount = 0U;
@@ -251,13 +294,9 @@ struct TypeDeducer<std::vector<ObjectType>>
 	{
 		elementsCount = 0;
 		elementSize = sizeof(ObjectType);
-		if (std::is_integral<ObjectType>::value)
+		if (std::is_fundamental<ObjectType>::value)
 		{
-			underlyingType = TypeInfo::Integral;
-		}
-		else if (std::is_floating_point<ObjectType>::value)
-		{
-			underlyingType = TypeInfo::Floating;
+			underlyingType = TypeInfo::Fundamental;
 		}
 		else if (std::is_class<ObjectType>::value)
 		{
@@ -274,6 +313,8 @@ struct TypeDeducer<std::vector<ObjectType>>
 		}
 	}
 
+	TypeInfo::Type keyType = TypeInfo::Undefined;
+	TypeInfo::Type valueType = TypeInfo::Undefined;
 	TypeInfo::Type type = TypeInfo::Array;
 	TypeInfo::Type underlyingType = TypeInfo::Undefined;
 	size_t elementsCount = 0U;
