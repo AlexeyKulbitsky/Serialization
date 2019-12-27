@@ -50,12 +50,12 @@ protected:
 
 	void SerializeByType(const TypeInfo& typeInfo, void* data)
 	{
-		switch (typeInfo.GetType())
+		switch (typeInfo.type)
 		{
 		case TypeInfo::Fundamental:
 		{
-			const auto typeId = typeInfo.GetTypeId();
-			const auto typeSize = typeInfo.GetElementSize();
+			const auto typeId = typeInfo.fundamentalTypeParams.typeIndex;
+			const auto typeSize = typeInfo.fundamentalTypeParams.typeSize;
 			ss.write(reinterpret_cast<char*>(data), typeSize);
 		}
 			break;
@@ -83,40 +83,26 @@ protected:
 		case TypeInfo::Array:
 		{
 			std::cout << " Type: [Array] Value:" << std::endl;
-
 			size_t elementsCount = 0U;
-			const auto& underlyingTypeInfo = typeInfo.GetUnderlyingType();
-			char* dataPtr = reinterpret_cast<char*>(data);
+			const auto& elementTypeInfo = typeInfo.arrayParams.elementTypeInfo;
 
-			switch (typeInfo.GetArrayType())
+			if (typeInfo.arrayParams.arrayType == TypeInfo::ArrayType::Vector)
 			{
-			case TypeInfo::ArrayType::CStyleArray:
-			{
-				elementsCount = typeInfo.GetElementsCount();
-				for (size_t i = 0U; i < elementsCount; ++i)
-				{
-					char* currentDataAddress = dataPtr + i * underlyingTypeInfo->GetElementSize();
-					SerializeByType(*underlyingTypeInfo, reinterpret_cast<void*>(currentDataAddress));
-				}
-			}
-				break;
-			case TypeInfo::ArrayType::StaticArray:
-				break;
-			case TypeInfo::ArrayType::Vector:
-			{
-				elementsCount = typeInfo.vectorParams.getSize(data);
+				elementsCount = typeInfo.arrayParams.getSize(data);
 				ss.write(reinterpret_cast<char*>(&elementsCount), sizeof(size_t));
-				for (size_t i = 0U; i < elementsCount; ++i)
-				{
-					void* currentDataAddress = typeInfo.vectorParams.getItem(data, i);
-					SerializeByType(*underlyingTypeInfo, currentDataAddress);
-				}
 			}
-				break;
-			default:
-				break;
+			else
+			{
+				elementsCount = typeInfo.arrayParams.elementsCount;
 			}
-			
+
+			elementsCount = typeInfo.arrayParams.elementsCount;
+			for (size_t i = 0U; i < elementsCount; ++i)
+			{
+				void* currentDataAddress = typeInfo.arrayParams.getItem(data, i);
+				SerializeByType(*elementTypeInfo, currentDataAddress);
+			}
+
 		}
 			break;
 		case TypeInfo::Enum:
@@ -151,11 +137,11 @@ protected:
 
 	void DeserializeByType(const TypeInfo& typeInfo, void* data)
 	{
-		switch (typeInfo.GetType())
+		switch (typeInfo.type)
 		{
 		case TypeInfo::Fundamental:
 		{
-			const auto typeSize = typeInfo.GetElementSize();
+			const auto typeSize = typeInfo.fundamentalTypeParams.typeSize;
 			char *buffer = new char[typeSize];
 
 			ss.read(buffer, typeSize);
@@ -186,39 +172,24 @@ protected:
 		break;
 		case TypeInfo::Array:
 		{
-			const auto& underlyingTypeInfo = typeInfo.GetUnderlyingType();
-			switch (typeInfo.GetArrayType())
+			size_t elementsCount = 0U;
+			const auto& underlyingTypeInfo = typeInfo.arrayParams.elementTypeInfo;
+
+			if (typeInfo.arrayParams.arrayType == TypeInfo::ArrayType::Vector)
 			{
-			case TypeInfo::ArrayType::CStyleArray:
-			{
-				const size_t elementsCount = typeInfo.GetElementsCount();
-				size_t offset = 0U;
-				char* dataPtr = reinterpret_cast<char*>(data);
-				for (size_t i = 0U; i < elementsCount; ++i)
-				{
-					char* currentDataAddress = dataPtr + i * underlyingTypeInfo->GetElementSize();
-					DeserializeByType(*underlyingTypeInfo, reinterpret_cast<void*>(currentDataAddress));
-				}
-			}
-				break;
-			case TypeInfo::ArrayType::StaticArray:
-				break;
-			case TypeInfo::ArrayType::Vector:
-			{
-				size_t elementsCount = 0;
 				ss.read(reinterpret_cast<char*>(&elementsCount), sizeof(size_t));
-				typeInfo.vectorParams.setSize(data, elementsCount);
-				for (size_t i = 0U; i < elementsCount; ++i)
-				{
-					void* currentDataAddress = typeInfo.vectorParams.getItem(data, i);
-					DeserializeByType(*underlyingTypeInfo, reinterpret_cast<void*>(currentDataAddress));
-				}
+				typeInfo.arrayParams.setSize(data, elementsCount);
 			}
-				break;
-			default:
-				break;
+			else
+			{
+				elementsCount = typeInfo.arrayParams.elementsCount;
 			}
-			
+
+			for (size_t i = 0U; i < elementsCount; ++i)
+			{
+				void* currentDataAddress = typeInfo.arrayParams.getItem(data, i);
+				DeserializeByType(*underlyingTypeInfo, reinterpret_cast<void*>(currentDataAddress));
+			}
 		}
 		break;
 		case TypeInfo::Enum:
@@ -297,6 +268,7 @@ struct TestStruct
 	int someArray[5] = { 1, 4, 5, 8, 9 };
 	int someMatrix[3][3] = { {1, 2, 3}, {3, 3, 3}, {6, 6, 6} };
 	std::vector<int> someVector;
+	std::array<int, 3> someStaticArray;
 	std::map<int, float> someMap;
 	Vec3 vec3;
 	Vec2* vec2 = nullptr;
@@ -319,13 +291,14 @@ int main()
 		.AddProperty("z", &Vec3::z);*/
 
 	class_<TestStruct>("TestStruct")
-		.AddProperty("intValue", &TestStruct::intValue)
+		//.AddProperty("intValue", &TestStruct::intValue)
 		.AddProperty("floatValue", &TestStruct::floatValue)
 		.AddProperty("someArray", &TestStruct::someArray)
-		//.AddProperty("someMatrix", &TestStruct::someMatrix)
-		//.AddProperty("someVector", &TestStruct::someVector)
+		.AddProperty("someStaticArray", &TestStruct::someStaticArray)
+		.AddProperty("someMatrix", &TestStruct::someMatrix)
+		.AddProperty("someVector", &TestStruct::someVector)
 		//.AddProperty("vec3", &TestStruct::vec3)
-		//.AddProperty("someMap", &TestStruct::someMap)
+		.AddProperty("someMap", &TestStruct::someMap)
 		//.AddProperty("vec2", &TestStruct::vec2)
 		//.AddProperty("someEnum", &TestStruct::someEnum)
 		//.AddProperty("Vec3Accessor", &TestStruct::GetVec3, &TestStruct::SetVec3)
@@ -341,12 +314,13 @@ int main()
 	TestStruct objectToSerialize;
 	objectToSerialize.intValue = 7;
 	objectToSerialize.floatValue = 23.5f;
+	objectToSerialize.someStaticArray[1] = 100;
 	//objectToSerialize.vec3.x = 1000.0f;
 	//objectToSerialize.vec3.y = 335.5f;
 	//objectToSerialize.vec3.z = 700.1f;
 	objectToSerialize.someArray[3] = 900;
 	objectToSerialize.someArray[4] = 7788;
-	//objectToSerialize.someMatrix[1][1] = 333333;
+	objectToSerialize.someMatrix[1][1] = 333333;
 	//objectToSerialize.someEnum = MyEnum::Second;
 	//objectToSerialize.SetVec3(Vec3{ 1.0f, 999.0f, 56.3f });
 	//objectToSerialize.someVector.push_back(100);

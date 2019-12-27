@@ -39,7 +39,7 @@ constexpr size_t GetTypeSize<Type>(Type) noexcept	\
 	return Size;									\
 }
 
-REGISTER_BASIC_TYPE(int, 1, sizeof (int))
+REGISTER_BASIC_TYPE(int, 1, sizeof(int))
 REGISTER_BASIC_TYPE(long int, 2, sizeof(long int))
 REGISTER_BASIC_TYPE(long long int, 3, sizeof(long long int))
 REGISTER_BASIC_TYPE(short, 4, sizeof(short))
@@ -52,7 +52,13 @@ REGISTER_BASIC_TYPE(unsigned char, 10, sizeof(unsigned char))
 REGISTER_BASIC_TYPE(float, 11, sizeof(float))
 REGISTER_BASIC_TYPE(double, 12, sizeof(double))
 
+class TypeInfo;
 
+template<typename T, typename Cond = void>
+struct TypeFiller
+{
+	static void Fill(TypeInfo& typeInfo) {}
+};
 
 
 class TypeInfo
@@ -80,7 +86,13 @@ public:
 		Undefined
 	};
 
-	struct VectorParams
+	struct FundamentalTypeParams
+	{
+		size_t typeSize;
+		size_t typeIndex;
+	} fundamentalTypeParams;
+
+	struct ArrayParams
 	{
 		using SizeGetter = std::function<size_t(void*)>;
 		using ItemGetter = std::function<void*(void*, const size_t)>;
@@ -90,7 +102,12 @@ public:
 		ItemGetter getItem;
 		SizeSetter setSize;
 
-	} vectorParams;
+		ArrayType arrayType;
+		std::unique_ptr<TypeInfo> elementTypeInfo;
+		// For C-style and static arrays
+		size_t elementsCount = 0U;
+
+	} arrayParams;
 
 	struct MapParams
 	{
@@ -115,114 +132,76 @@ public:
 
 	} mapParams;
 
-	const Type GetType() const { return m_type; }
-	const uintptr_t GetObjectDescId() const { return m_objectDescId; }
-	const std::unique_ptr<TypeInfo>& GetUnderlyingType() const { return m_underlyingType; }
-	const ArrayType GetArrayType() const { return m_arrayType; }
-	const size_t GetElementsCount() const { return m_elementsCount; }
-	const size_t GetElementSize() const { return m_elementSize; }
-	const size_t GetTypeId() const { return m_typeIndex; }
+	const uintptr_t GetObjectDescId() const { return objectDescId; }
+	//const std::unique_ptr<TypeInfo>& GetUnderlyingType() const { return underlyingType; }
 
 	template<typename ObjectType>
 	void Init()
 	{
 		if (std::is_fundamental<ObjectType>::value)
 		{
-			m_typeIndex = TypeToId<ObjectType>();
-			m_elementSize = GetTypeSize<ObjectType>();
-			m_type = Fundamental;
+			type = Fundamental;
+			fundamentalTypeParams.typeIndex = TypeToId<ObjectType>();
+			fundamentalTypeParams.typeSize = GetTypeSize<ObjectType>();
 		}
 		else if (std::is_enum<ObjectType>::value)
 		{
-			m_type = Enum;
-		}
-		else if (std::is_array<ObjectType>::value)
-		{
-			TypeDeducer<ObjectType> deducer;
-			m_type = Array;
-			m_arrayType = ArrayType::CStyleArray;
-
-			// Get the size of array and the type of element
-			m_elementsCount = deducer.elementsCount;
-
-			auto typeInfo = std::make_unique<TypeInfo>();
-			m_underlyingType = std::move(typeInfo);
-			m_underlyingType->m_type = deducer.underlyingType;
-			m_underlyingType->m_elementSize = deducer.elementSize;
-
-			using ElementType = std::remove_extent<ObjectType>::type;
-			m_underlyingType->Init<ElementType>();
-		}
-		else if (std::is_pointer<ObjectType>::value)
-		{
-			m_type = Pointer;
-			using RawObjectType = std::remove_pointer<ObjectType>::type;
-
-			auto typeInfo = std::make_unique<TypeInfo>();
-			m_underlyingType = std::move(typeInfo);
-			m_underlyingType->Init<RawObjectType>();
-		}
-		else if (is_string<ObjectType>::value)
-		{
-			m_type = String;
+			type = Enum;
 		}
 		else if (is_vector<ObjectType>::value)
 		{
-			TypeDeducer<ObjectType> deducer;
-			m_type = Array;
-			m_arrayType = ArrayType::Vector;
+			type = Array;
+			arrayParams.arrayType = ArrayType::Vector;
 
-			m_elementsCount = 0U;
-			m_underlyingType = std::make_unique<TypeInfo>();
-			m_underlyingType->m_type = deducer.underlyingType;
-			m_underlyingType->m_elementSize = deducer.elementSize;
-
-			using ElemetType = remove_vector_extent<ObjectType>::type;
-			m_underlyingType->Init<ElemetType>();
-
-			vectorParams.getSize = VectorSizeGetter<ElemetType>;
-			vectorParams.getItem = VectorItemGetter<ElemetType>;
-			vectorParams.setSize = VectorSizeSetter<ElemetType>;
+			TypeFiller<ObjectType>::Fill(*this);
 		}
+		else if (is_static_array<ObjectType>::value)
+		{
+			type = Array;
+			arrayParams.arrayType = ArrayType::StaticArray;
+
+			TypeFiller<ObjectType>::Fill(*this);
+		}
+		else if (std::is_array<ObjectType>::value)
+		{
+			type = Array;
+			arrayParams.arrayType = ArrayType::CStyleArray;
+
+			TypeFiller<ObjectType>::Fill(*this);
+		}
+		else if (std::is_pointer<ObjectType>::value)
+		{
+			type = Pointer;
+			using RawObjectType = std::remove_pointer<ObjectType>::type;
+
+			auto typeInfo = std::make_unique<TypeInfo>();
+			underlyingType = std::move(typeInfo);
+			underlyingType->Init<RawObjectType>();
+		}
+		else if (is_string<ObjectType>::value)
+		{
+			type = String;
+		}
+		
 		else if (is_map<ObjectType>::value)
 		{
-			TypeDeducer<ObjectType> deducer;
-			m_type = Map;
-			mapParams.keyTypeInfo = std::make_unique<TypeInfo>();
-			mapParams.valueTypeInfo = std::make_unique<TypeInfo>();
-
-			mapParams.keyTypeInfo->m_type = deducer.keyType;
-			mapParams.valueTypeInfo->m_type = deducer.valueType;
-
-			using KeyType = extract_key_value_from_map<ObjectType>::key_type;
-			using ValueType = extract_key_value_from_map<ObjectType>::value_type;
-			/*mapParams.getSize = MapSizeGetter<ObjectType>;
-			mapParams.getIterator = MapIteratorGetter<ObjectType>;
-			mapParams.getKey = MapKeyGetter<ObjectType>;
-			mapParams.getValue = MapValueGetter<ObjectType>;
-			mapParams.isIteratorValid = MapIteratorValidator<ObjectType>;
-			mapParams.incrementIterator = MapIteratorIncrementator<ObjectType>;
-			mapParams.setKeyValue = MapKeyValueSetter<ObjectType>;*/
+			type = Map;
+			TypeFiller<ObjectType>::Fill(*this);
 		}
 		else if (std::is_class<ObjectType>::value)
 		{
 			const auto& objectFactory = ObjectFactory::GetInstance();
 			if (objectFactory.IsObjectRegistered<ObjectType>())
 			{
-				m_type = Class;
-				m_objectDescId = objectFactory.GetObjectId<ObjectType>();
+				type = Class;
+				objectDescId = objectFactory.GetObjectId<ObjectType>();
 			}
 		}
 	}
 
-private:
-	Type m_type = Type::Undefined;
-	ArrayType m_arrayType = ArrayType::Undefined;
-	uintptr_t m_objectDescId = 0U;
-	size_t m_elementsCount = 0U;
-	size_t m_elementSize = 0U;
-	std::unique_ptr<TypeInfo> m_underlyingType;
-	size_t m_typeIndex = 0U;
+	Type type = Type::Undefined;
+	uintptr_t objectDescId = 0U;
+	std::unique_ptr<TypeInfo> underlyingType;
 };
 
 template<typename ObjectType>
@@ -361,6 +340,230 @@ struct TypeDeducer<std::unordered_map<KeyType, ValueType>>
 	TypeInfo::Type underlyingType = TypeInfo::Undefined;
 	size_t elementsCount = 0U;
 	size_t elementSize = 0U;
+};
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+template<typename T>
+const size_t VectorSizeGetter(void* data)
+{
+	using VectorType = std::vector<T>;
+	auto vectorPtr = reinterpret_cast<VectorType*>(data);
+	const size_t size = (*vectorPtr).size();
+	return size;
+}
+
+template<typename T>
+void* VectorItemGetter(void* data, const size_t idx)
+{
+	using VectorType = std::vector<T>;
+	auto vectorPtr = reinterpret_cast<VectorType*>(data);
+	auto dataPtr = &((*vectorPtr)[idx]);
+	return reinterpret_cast<void*>(dataPtr);
+}
+
+template<typename T>
+void VectorSizeSetter(void* data, const size_t size)
+{
+	using VectorType = std::vector<T>;
+	auto vectorPtr = reinterpret_cast<VectorType*>(data);
+	(*vectorPtr).resize(size);
+}
+
+
+template<typename T>
+void* ArrayItemGetter(void* data, const size_t idx)
+{
+	auto arrayPtr = reinterpret_cast<T*>(data);
+	auto dataPtr = &(arrayPtr[idx]);
+	return reinterpret_cast<void*>(dataPtr);
+}
+
+template<typename T, size_t N>
+void* StaticArrayItemGetter(void* data, const size_t idx)
+{
+	using ArrayType = std::array<T, N>;
+	auto arrayPtr = reinterpret_cast<ArrayType*>(data);
+	auto dataPtr = &((*arrayPtr)[idx]);
+	return reinterpret_cast<void*>(dataPtr);
+}
+
+template<typename T>
+struct TypeFiller<T, std::enable_if_t<is_vector<T>::value>>
+{
+	static void Fill(TypeInfo& typeInfo)
+	{
+		typeInfo.arrayParams.elementTypeInfo = std::make_unique<TypeInfo>();
+		typeInfo.arrayParams.getSize = VectorSizeGetter<T>;
+		typeInfo.arrayParams.getItem = VectorItemGetter<T>;
+		typeInfo.arrayParams.setSize = VectorSizeSetter<T>;
+
+		using ElementType = remove_vector_extent<T>::type;
+		typeInfo.arrayParams.elementTypeInfo->Init<ElementType>();
+	}
+};
+
+template<typename T>
+struct ArraySize{};
+
+template<typename T, size_t N>
+struct ArraySize<T[N]>
+{
+	static constexpr size_t size = N;
+};
+
+template<typename T, size_t N>
+struct ArraySize<std::array<T, N>>
+{
+	static constexpr size_t size = N;
+};
+
+template<typename T>
+struct TypeFiller<T, std::enable_if_t<is_static_array<T>::value>>
+{
+	static void Fill(TypeInfo& typeInfo)
+	{
+		using ElementType = remove_static_array_extent<T>::type;
+		typeInfo.arrayParams.getItem = StaticArrayItemGetter<ElementType, ArraySize<T>::size>;
+		typeInfo.arrayParams.elementsCount = ArraySize<T>::size;
+
+		typeInfo.arrayParams.elementTypeInfo = std::make_unique<TypeInfo>();
+		typeInfo.arrayParams.elementTypeInfo->Init<ElementType>();
+	}
+};
+
+template<typename T>
+struct TypeFiller<T, std::enable_if_t<std::is_array<T>::value>>
+{
+	static void Fill(TypeInfo& typeInfo)
+	{
+		using ElementType = std::remove_extent<T>::type;
+		typeInfo.arrayParams.getItem = ArrayItemGetter<ElementType>;
+		typeInfo.arrayParams.elementsCount = ArraySize<T>::size;	
+
+		typeInfo.arrayParams.elementTypeInfo = std::make_unique<TypeInfo>();
+		typeInfo.arrayParams.elementTypeInfo->Init<ElementType>();
+	}
+};
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+
+template<typename T>
+struct MapTypeWrapper;
+
+template<typename Key, typename Value>
+struct MapTypeWrapper<std::map<Key, Value>>
+{
+	using MapType = std::map<Key, Value>;
+	using KeyType = Key;
+	using ValueType = Value;
+};
+
+template<typename Key, typename Value>
+struct MapTypeWrapper<std::unordered_map<Key, Value>>
+{
+	using MapType = std::unordered_map<Key, Value>;
+	using KeyType = Key;
+	using ValueType = Value;
+};
+
+template<typename MapType>
+const size_t MapSizeGetter(void* data)
+{
+	auto mapPtr = reinterpret_cast<MapType*>(data);
+	const size_t size = (*mapPtr).size();
+	return size;
+}
+
+template<typename MapType>
+void* MapIteratorGetter(void* data)
+{
+	auto mapPtr = reinterpret_cast<MapType*>(data);
+	auto it = (*mapPtr).begin();
+	auto t = new decltype(it);
+	(*t) = it;
+	return t;
+}
+
+template<typename MapType>
+const void* MapKeyGetter(void* data)
+{
+	using IteratorType = MapType::iterator;
+
+	IteratorType* itPtr = reinterpret_cast<IteratorType*>(data);
+	auto keyPtr = &((*itPtr)->first);
+
+	auto dataPtr = reinterpret_cast<const void*>(keyPtr);
+	return dataPtr;
+}
+
+template<typename MapType>
+void* MapValueGetter(void* data)
+{
+	using IteratorType = MapType::iterator;
+
+	IteratorType* itPtr = reinterpret_cast<IteratorType*>(data);
+	auto valuePtr = &((*itPtr)->second);
+
+	auto dataPtr = reinterpret_cast<void*>(valuePtr);
+	return dataPtr;
+}
+
+template<typename MapType>
+const bool MapIteratorValidator(void* iteratorRawPtr, void* mapRawPtr)
+{
+	using IteratorType = MapType::iterator;
+
+	auto mapPtr = reinterpret_cast<MapType*>(mapRawPtr);
+	auto itPtr = reinterpret_cast<IteratorType*>(iteratorRawPtr);
+
+	const bool res = (*itPtr) != mapPtr->end();
+	return res;
+}
+
+template<typename MapType>
+void MapIteratorIncrementator(void* iteratorRawPtr)
+{
+	using IteratorType = MapType::iterator;
+	auto itPtr = reinterpret_cast<IteratorType*>(iteratorRawPtr);
+	++(*itPtr);
+}
+
+template<typename MapType, typename KeyType, typename ValueType>
+void MapKeyValueSetter(void* map, void* key, void* value)
+{
+	auto mapPtr = reinterpret_cast<MapType*>(map);
+	auto keyPtr = reinterpret_cast<KeyType*>(key);
+	auto valuePtr = reinterpret_cast<ValueType*>(value);
+
+	(*mapPtr)[(*keyPtr)] = (*valuePtr);
+}
+
+
+template<typename T>
+struct TypeFiller<T, std::enable_if_t<is_map<T>::value>>
+{
+	static void Fill(TypeInfo& typeInfo)
+	{
+		using MapType = MapTypeWrapper<T>::MapType;
+		using KeyType = MapTypeWrapper<T>::KeyType;
+		using ValueType = MapTypeWrapper<T>::ValueType;
+		
+		typeInfo.mapParams.getSize = MapSizeGetter<MapType>;
+		typeInfo.mapParams.getIterator = MapIteratorGetter<MapType>;
+		typeInfo.mapParams.getKey = MapKeyGetter<MapType>;
+		typeInfo.mapParams.getValue = MapValueGetter<MapType>;
+		typeInfo.mapParams.isIteratorValid = MapIteratorValidator<MapType>;
+		typeInfo.mapParams.incrementIterator = MapIteratorIncrementator<MapType>;
+		typeInfo.mapParams.setKeyValue = MapKeyValueSetter<MapType, KeyType, ValueType>;
+
+		typeInfo.mapParams.keyTypeInfo = std::make_unique<TypeInfo>();
+		typeInfo.mapParams.keyTypeInfo->Init<KeyType>();
+		typeInfo.mapParams.valueTypeInfo = std::make_unique<TypeInfo>();
+		typeInfo.mapParams.valueTypeInfo->Init<ValueType>();
+	}
 };
 
 #endif // !TYPE_INFO_INCLUDE

@@ -17,7 +17,7 @@ public:
 
 	const TypeInfo::Type GetType() const
 	{
-		return m_typeInfo.GetType();
+		return m_typeInfo.type;
 	}
 
 	const TypeInfo& GetTypeInfo() const
