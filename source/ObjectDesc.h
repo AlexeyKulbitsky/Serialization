@@ -86,6 +86,8 @@ private:
 	ConcreteObjectFactory* m_factory = nullptr;
 	std::unordered_map<std::string, Property*> m_properties;
 	std::string m_name;
+
+	friend class ObjectFactory;
 };
 
 #endif

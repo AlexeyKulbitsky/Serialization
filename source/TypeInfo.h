@@ -133,7 +133,6 @@ public:
 	} mapParams;
 
 	const uintptr_t GetObjectDescId() const { return objectDescId; }
-	//const std::unique_ptr<TypeInfo>& GetUnderlyingType() const { return underlyingType; }
 
 	template<typename ObjectType>
 	void Init()

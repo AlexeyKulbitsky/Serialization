@@ -34,6 +34,29 @@ public:
         return objectDesc;
     }
 
+	template<typename ObjectType, typename BaseObjectType>
+	ObjectDesc& RegisterObject(const std::string& objectName)
+	{
+		const auto objectId = GetObjectId<ObjectType>();
+		auto findResult = m_descs.find(objectId);
+		assert(findResult == m_descs.end());
+
+		m_descs[objectId] = ObjectDesc(objectName);
+		auto& objectDesc = m_descs.at(objectId);
+		objectDesc.CreateFactory<ObjectType>();
+
+
+		// Fill with BaseObjectType properties
+		const auto baseObjectId = GetObjectId<BaseObjectType>();
+		findResult = m_descs.find(baseObjectId);
+		if (findResult != m_descs.end())
+		{
+			auto& baseObjectDesc = m_descs.at(baseObjectId);
+			objectDesc.m_properties = baseObjectDesc.m_properties;
+		}
+		return objectDesc;
+	}
+
 	template<typename ObjectType>
 	const ObjectDesc& GetObjectDesc()
 	{
@@ -86,11 +109,18 @@ private:
 	TempContainer m_tempContainer;
 };
 
-template <typename ObjectType>
+template<typename ObjectType>
 ObjectDesc& class_(const std::string& objectName)
 {
     auto& instance = ObjectFactory::GetInstance();
     return instance.RegisterObject<ObjectType>(objectName);
+}
+
+template<typename ObjectType, typename BaseObjectType>
+ObjectDesc& class_(const std::string& objectName)
+{
+	auto& instance = ObjectFactory::GetInstance();
+	return instance.RegisterObject<ObjectType, BaseObjectType>(objectName);
 }
 
 #endif
