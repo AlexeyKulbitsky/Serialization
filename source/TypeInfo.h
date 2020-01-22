@@ -7,7 +7,7 @@
 #include <iostream>
 #include <memory>
 #include <functional>
-
+#include <cstdint>
 
 template<size_t index>
 using TypeId_ = std::integral_constant<size_t, index>;
@@ -39,18 +39,30 @@ constexpr size_t GetTypeSize<Type>(Type) noexcept	\
 	return Size;									\
 }
 
-REGISTER_BASIC_TYPE(int, 1, sizeof(int))
-REGISTER_BASIC_TYPE(long int, 2, sizeof(long int))
-REGISTER_BASIC_TYPE(long long int, 3, sizeof(long long int))
-REGISTER_BASIC_TYPE(short, 4, sizeof(short))
-REGISTER_BASIC_TYPE(char, 5, sizeof(char))
-REGISTER_BASIC_TYPE(unsigned int, 6, sizeof(unsigned int))
-REGISTER_BASIC_TYPE(unsigned long int, 7, sizeof(unsigned long int))
-REGISTER_BASIC_TYPE(unsigned long long int, 8, sizeof(unsigned long long int))
-REGISTER_BASIC_TYPE(unsigned short, 9, sizeof(unsigned short))
-REGISTER_BASIC_TYPE(unsigned char, 10, sizeof(unsigned char))
-REGISTER_BASIC_TYPE(float, 11, sizeof(float))
-REGISTER_BASIC_TYPE(double, 12, sizeof(double))
+REGISTER_BASIC_TYPE(int8_t, 1, sizeof(int8_t))
+REGISTER_BASIC_TYPE(int16_t, 2, sizeof(int16_t))
+REGISTER_BASIC_TYPE(int32_t, 3, sizeof(int32_t))
+REGISTER_BASIC_TYPE(int64_t, 4, sizeof(int64_t))
+REGISTER_BASIC_TYPE(uint8_t, 5, sizeof(uint8_t))
+REGISTER_BASIC_TYPE(uint16_t, 6, sizeof(uint16_t))
+REGISTER_BASIC_TYPE(uint32_t, 7, sizeof(uint32_t))
+REGISTER_BASIC_TYPE(uint64_t, 8, sizeof(uint64_t))
+REGISTER_BASIC_TYPE(float, 9, sizeof(float))
+REGISTER_BASIC_TYPE(double, 10, sizeof(double))
+
+enum BasicType
+{
+	BT_INT_8 = 1,
+	BT_INT_16,
+	BT_INT_32,
+	BT_INT_64,
+	BT_UNSIGNED_INT_8,
+	BT_UNSIGNED_INT_16,
+	BT_UNSIGNED_INT_32,
+	BT_UNSIGNED_INT_64,
+	BT_FLOAT,
+	BT_DOUBLE
+};
 
 class TypeInfo;
 
@@ -133,19 +145,27 @@ public:
 	} mapParams;
 
 	const uintptr_t GetObjectDescId() const { return objectDescId; }
+	std::function<void(void*&, size_t&)> createDefaultValue;
+	std::function<void(void*)> deleteValue;
 
 	template<typename ObjectType>
 	void Init()
 	{
+		createDefaultValue = AllocateDefaultValue<ObjectType>;
+		deleteValue = DeallocateValue<ObjectType>;
+
 		if (std::is_fundamental<ObjectType>::value)
 		{
 			type = Fundamental;
 			fundamentalTypeParams.typeIndex = TypeToId<ObjectType>();
 			fundamentalTypeParams.typeSize = GetTypeSize<ObjectType>();
+			
 		}
 		else if (std::is_enum<ObjectType>::value)
 		{
 			type = Enum;
+
+			TypeFiller<ObjectType>::Fill(*this);
 		}
 		else if (is_vector<ObjectType>::value)
 		{
@@ -202,147 +222,6 @@ public:
 	uintptr_t objectDescId = 0U;
 	std::unique_ptr<TypeInfo> underlyingType;
 };
-
-template<typename ObjectType>
-struct TypeDeducer
-{
-	TypeDeducer()
-	{
-		if (std::is_fundamental<ObjectType>::value)
-		{
-			type = TypeInfo::Fundamental;
-		}
-		else if (std::is_class<ObjectType>::value)
-		{
-			type = TypeInfo::Class;
-		}
-		else if (std::is_pointer<ObjectType>::value)
-		{
-			type = TypeInfo::Pointer;
-		}
-	}
-
-	TypeInfo::Type keyType = TypeInfo::Undefined;
-	TypeInfo::Type valueType = TypeInfo::Undefined;
-	TypeInfo::Type type = TypeInfo::Undefined;
-	TypeInfo::Type underlyingType = TypeInfo::Undefined;
-	size_t elementsCount = 0U;
-	size_t elementSize = 0U;
-};
-
-template<typename ObjectType, size_t N>
-struct TypeDeducer<ObjectType[N]>
-{
-	TypeDeducer()
-	{
-		elementsCount = N;
-		elementSize = sizeof(ObjectType);
-		if (std::is_fundamental<ObjectType>::value)
-		{
-			underlyingType = TypeInfo::Fundamental;
-		}
-		else if (std::is_class<ObjectType>::value)
-		{
-			underlyingType = TypeInfo::Class;
-		}
-		else if (std::is_array<ObjectType>::value)
-		{
-			TypeDeducer<ObjectType> deducer;
-			underlyingType = TypeInfo::Array;
-		}
-		else if (std::is_pointer<ObjectType>::value)
-		{
-			underlyingType = TypeInfo::Pointer;
-		}
-	}
-
-	TypeInfo::Type keyType = TypeInfo::Undefined;
-	TypeInfo::Type valueType = TypeInfo::Undefined;
-	TypeInfo::Type type = TypeInfo::Array;
-	TypeInfo::Type underlyingType = TypeInfo::Undefined;
-	size_t elementsCount = 0U;
-	size_t elementSize = 0U;
-};
-
-
-template<typename ObjectType>
-struct TypeDeducer<std::vector<ObjectType>>
-{
-	TypeDeducer()
-	{
-		elementsCount = 0;
-		elementSize = sizeof(ObjectType);
-		if (std::is_fundamental<ObjectType>::value)
-		{
-			underlyingType = TypeInfo::Fundamental;
-		}
-		else if (std::is_class<ObjectType>::value)
-		{
-			underlyingType = TypeInfo::Class;
-		}
-		else if (std::is_array<ObjectType>::value)
-		{
-			TypeDeducer<ObjectType> deducer;
-			underlyingType = TypeInfo::Array;
-		}
-		else if (std::is_pointer<ObjectType>::value)
-		{
-			underlyingType = TypeInfo::Pointer;
-		}
-	}
-
-	TypeInfo::Type keyType = TypeInfo::Undefined;
-	TypeInfo::Type valueType = TypeInfo::Undefined;
-	TypeInfo::Type type = TypeInfo::Array;
-	TypeInfo::Type underlyingType = TypeInfo::Undefined;
-	size_t elementsCount = 0U;
-	size_t elementSize = 0U;
-};
-
-
-template<typename KeyType, typename ValueType>
-struct TypeDeducer<std::map<KeyType, ValueType>>
-{
-	TypeDeducer()
-	{
-		TypeDeducer<KeyType> keyTypeDeducer;
-		TypeDeducer<ValueType> valueTypeDeducer;
-
-		keyType = keyTypeDeducer.type;
-		valueType = valueTypeDeducer.type;
-	}
-
-	TypeInfo::Type keyType = TypeInfo::Undefined;
-	TypeInfo::Type valueType = TypeInfo::Undefined;
-	TypeInfo::Type underlyingType = TypeInfo::Undefined;
-	size_t elementsCount = 0U;
-	size_t elementSize = 0U;
-};
-
-template<typename KeyType, typename ValueType>
-struct TypeDeducer<std::unordered_map<KeyType, ValueType>>
-{
-	TypeDeducer()
-	{
-		TypeDeducer<KeyType> keyTypeDeducer;
-		TypeDeducer<ValueType> valueTypeDeducer;
-
-		keyType = keyTypeDeducer.type;
-		valueType = valueTypeDeducer.type;
-	}
-
-	TypeInfo::Type type = TypeInfo::Map;
-
-	TypeInfo::Type keyType = TypeInfo::Undefined;
-	TypeInfo::Type valueType = TypeInfo::Undefined;
-
-	TypeInfo::Type underlyingType = TypeInfo::Undefined;
-	size_t elementsCount = 0U;
-	size_t elementSize = 0U;
-};
-
-
-//////////////////////////////////////////////////////////////////////////////////////////////////
 
 template<typename T>
 const size_t VectorSizeGetter(void* data)
@@ -564,6 +443,48 @@ struct TypeFiller<T, std::enable_if_t<is_map<T>::value>>
 		typeInfo.mapParams.valueTypeInfo->Init<ValueType>();
 	}
 };
+
+template<typename T>
+struct TypeFiller<T, std::enable_if_t<std::is_enum<T>::value>>
+{
+	static void Fill(TypeInfo& typeInfo)
+	{
+		using UnderlyingType = std::underlying_type<T>::type;
+		typeInfo.fundamentalTypeParams.typeIndex = TypeToId<UnderlyingType>();
+		typeInfo.fundamentalTypeParams.typeSize = GetTypeSize<UnderlyingType>();
+	}
+};
+
+template<typename T>
+std::enable_if_t<std::is_default_constructible<T>::value>
+AllocateDefaultValue(void*& data, size_t& size)
+{
+	data = reinterpret_cast<void*>(new T());
+	size = sizeof(T);
+}
+
+template<typename T>
+std::enable_if_t<!std::is_default_constructible<T>::value>
+AllocateDefaultValue(void*& data, size_t& size)
+{
+	data = nullptr;
+	size = 0U;
+}
+
+template<typename T>
+std::enable_if_t<std::is_default_constructible<T>::value>
+DeallocateValue(void* data)
+{
+	auto t = reinterpret_cast<T*>(data);
+	delete t;
+}
+
+template<typename T>
+std::enable_if_t<!std::is_default_constructible<T>::value>
+DeallocateValue(void* data)
+{
+}
+
 
 #endif // !TYPE_INFO_INCLUDE
 

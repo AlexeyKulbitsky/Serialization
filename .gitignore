@@ -1,2 +1,4 @@
 bin/
 build/
+example/bin
+example/build

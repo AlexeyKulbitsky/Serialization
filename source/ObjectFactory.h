@@ -102,11 +102,11 @@ public:
 		return findResult != m_descs.end();
 	}
 
-	TempContainer& GetTempContainer() { return m_tempContainer; }
+	TempContainer& GetTempContainer(const size_t index = 0U) { return m_tempContainers[index]; }
 
 private:
     std::unordered_map<uintptr_t, ObjectDesc> m_descs;
-	TempContainer m_tempContainer;
+	std::array<TempContainer, 2U> m_tempContainers;
 };
 
 template<typename ObjectType>

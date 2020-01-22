@@ -30,6 +30,20 @@ public:
 		std::memcpy(m_data, &value, valueSize);
 	}
 
+	void Reserve(const size_t size)
+	{
+		if (size > m_currentSize)
+		{
+			Realloc(size);
+		}
+	}
+
+	void SetData(void* data, const size_t size)
+	{
+		Reserve(size);
+		std::memcpy(m_data, data, size);
+	}
+
 	void* GetData() { return m_data; }
 private:
 	void Realloc(const size_t newSize)

@@ -2,6 +2,7 @@
 #define SERIALIZER_INCLUDE
 
 #include "ObjectFactory.h"
+#include <set>
 
 class Serializer
 {
@@ -15,8 +16,15 @@ public:
 
 		const auto& objectDesc = factoryInstance.GetObjectDesc<ObjectType>();
 		void* objectRawPtr = reinterpret_cast<void*>(object);
-		
-		SerializeInternal(objectDesc, objectRawPtr);
+
+		const bool isAlreadySerialized = m_serializedPointers.find(objectRawPtr) != m_serializedPointers.end();
+		const bool isMarkedForSerialization = m_pointersToSerialize.find(objectRawPtr) != m_pointersToSerialize.end();
+
+		if (!isAlreadySerialized && !isMarkedForSerialization)
+		{
+			SerializeInternal(objectDesc, objectRawPtr);
+			m_serializedPointers.insert(objectRawPtr);
+		}
 	}
 
 	template<typename ObjectType>
@@ -54,9 +62,28 @@ public:
 		DeserializeInternal(objectDesc, objectRawPtr);
 	}
 
+	void SerializePointers()
+	{
+		for (auto& it : m_pointersToSerialize)
+		{
+			auto addr = it.first;
+			auto typeInfo = it.second;
+
+			auto& factoryInstance = ObjectFactory::GetInstance();
+			const auto id = typeInfo->GetObjectDescId();
+
+			const auto& childObjectDesc = factoryInstance.GetObjectDesc(id);
+			SerializeInternal(childObjectDesc, addr);
+		}
+		m_pointersToSerialize.clear();
+	}
+
 protected:
 	virtual void SerializeInternal(const ObjectDesc& objectDesc, void* object) = 0;
 	virtual void DeserializeInternal(const ObjectDesc& objectDesc, void* object) = 0;
+
+	std::unordered_map<void*, TypeInfo*> m_pointersToSerialize;
+	std::set<void*> m_serializedPointers;
 };
 
 #endif
