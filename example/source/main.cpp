@@ -27,7 +27,7 @@ private:
 protected:
 	void SerializeInternal(const ObjectDesc& objectDesc, void* object) override final
 	{
-		Json::Value child;
+		Json::Value objectValue;
 		const auto& properties = objectDesc.GetProperties();
 
 		for (const auto prop : properties)
@@ -40,10 +40,10 @@ protected:
 
 			SerializeByType(typeInfo, data);
 
-			child[prop.first] = propertyValue;
+			objectValue[prop.first] = propertyValue;
 		}
 
-		m_root[objectDesc.GetName()] = child;
+		m_root[objectDesc.GetName()] = objectValue;
 	}
 
 	void DeserializeInternal(const ObjectDesc& objectDesc, void* object) override final
@@ -102,7 +102,26 @@ protected:
 			const auto id = typeInfo.GetObjectDescId();
 
 			const auto& childObjectDesc = factoryInstance.GetObjectDesc(id);
-			SerializeInternal(childObjectDesc, data);
+
+			auto temp = m_currentValue;
+
+			Json::Value objectValue;
+			const auto& childProperties = childObjectDesc.GetProperties();
+
+			for (const auto childProp : childProperties)
+			{
+				const auto& propertyTypeInfo = childProp.second->GetTypeInfo();
+				void* childData = childProp.second->GetValue(data);
+
+				Json::Value propertyValue;
+				m_currentValue = &propertyValue;
+
+				SerializeByType(propertyTypeInfo, childData);
+
+				objectValue[childProp.first] = propertyValue;
+			}
+
+			(*temp) = objectValue;
 		}
 			break;
 		case TypeInfo::String:
@@ -218,7 +237,27 @@ protected:
 			const auto id = typeInfo.GetObjectDescId();
 
 			const auto& childObjectDesc = factoryInstance.GetObjectDesc(id);
-			DeserializeInternal(childObjectDesc, data);
+
+			const auto& childProperties = childObjectDesc.GetProperties();
+
+			auto child = m_currentValue;
+
+			for (const auto childProp : childProperties)
+			{
+				const auto& childTypeInfo = childProp.second->GetTypeInfo();
+				void* childData = childProp.second->GetValue(data);
+
+				const bool isMember = (*child).isMember(childProp.first);
+				if (isMember)
+				{
+					Json::Value propertyValue = (*child)[childProp.first];
+					m_currentValue = &propertyValue;
+
+					DeserializeByType(childTypeInfo, childData);
+
+					childProp.second->SetValue(data, childData);
+				}
+			}
 		}
 		break;
 		case TypeInfo::String:
