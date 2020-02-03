@@ -17,16 +17,16 @@ public:
 
 	const TypeInfo::Type GetType() const
 	{
-		return m_typeInfo.type;
+		return m_typeInfo->type;
 	}
 
 	const TypeInfo& GetTypeInfo() const
 	{
-		return m_typeInfo;
+		return *m_typeInfo;
 	}
 
 protected:
-	TypeInfo m_typeInfo;
+	TypeInfo* m_typeInfo = nullptr;
 
 private:
     std::string m_name = "";
@@ -41,7 +41,12 @@ public:
         : Property(name)
 		, m_assigner(fieldPtr)
     {
-		m_typeInfo.Init<FieldType>();
+		auto& typeInfoCollection = TypeInfoCollection::GetInstance();
+		if (!typeInfoCollection.IsTypeInfoRegistered<FieldType>())
+		{
+			typeInfoCollection.RegisterTypeInfo<FieldType>();
+		}
+		m_typeInfo = typeInfoCollection.GetTypeInfo<FieldType>();
     }
 
     void SetValue(void* object, void* data) override final
@@ -71,7 +76,13 @@ public:
     {
 		using NonReferenceType = std::remove_reference<SetType>::type;
 		using BaseType = std::remove_cv<NonReferenceType>::type;
-		m_typeInfo.Init<BaseType>();
+
+		auto& typeInfoCollection = TypeInfoCollection::GetInstance();
+		if (!typeInfoCollection.IsTypeInfoRegistered<BaseType>())
+		{
+			typeInfoCollection.RegisterTypeInfo<BaseType>();
+		}
+		m_typeInfo = typeInfoCollection.GetTypeInfo<BaseType>();
     }
 
     AccessorProperty(const std::string& name, ReturnType(ObjectType::* getter)() const, void (ObjectType::* setter)(SetType))
@@ -81,7 +92,13 @@ public:
     {
 		using NonReferenceType = std::remove_reference<SetType>::type;
 		using BaseType = std::remove_cv<NonReferenceType>::type;
-		m_typeInfo.Init<BaseType>();
+
+		auto& typeInfoCollection = TypeInfoCollection::GetInstance();
+		if (!typeInfoCollection.IsTypeInfoRegistered<BaseType>())
+		{
+			typeInfoCollection.RegisterTypeInfo<BaseType>();
+		}
+		m_typeInfo = typeInfoCollection.GetTypeInfo<BaseType>();
     }
 
     void SetValue(void* object, void* data) override final

@@ -8,6 +8,7 @@
 #include <memory>
 #include <functional>
 #include <cstdint>
+#include <cassert>
 
 template<size_t index>
 using TypeId_ = std::integral_constant<size_t, index>;
@@ -50,6 +51,21 @@ REGISTER_BASIC_TYPE(uint64_t, 8, sizeof(uint64_t))
 REGISTER_BASIC_TYPE(float, 9, sizeof(float))
 REGISTER_BASIC_TYPE(double, 10, sizeof(double))
 
+template <typename T>
+struct GetTypeNameHelper
+{
+	static std::string GetTypeName()
+	{
+		return std::string(__FUNCTION__);
+	}
+};
+
+template <typename T>
+std::string GetTypeName()
+{
+	return GetTypeNameHelper<T>::GetTypeName();
+}
+
 enum BasicType
 {
 	BT_INT_8 = 1,
@@ -72,6 +88,24 @@ struct TypeFiller
 	static void Fill(TypeInfo& typeInfo) {}
 };
 
+class TypeInfoCollection
+{
+public:
+	static TypeInfoCollection& GetInstance();
+
+	template<typename T>
+	TypeInfo* RegisterTypeInfo();
+
+	template<typename T>
+	TypeInfo* GetTypeInfo();
+
+	TypeInfo* GetTypeInfo(const std::string& typeName);
+
+	template<typename T>
+	bool IsTypeInfoRegistered() const;
+private:
+	std::unordered_map <std::string, TypeInfo> m_typeInfos;
+};
 
 class TypeInfo
 {
@@ -148,6 +182,8 @@ public:
 	std::function<void(void*&, size_t&)> createDefaultValue;
 	std::function<void(void*)> deleteValue;
 
+	const std::string& GetName() const { return m_name; }
+
 	template<typename ObjectType>
 	void Init()
 	{
@@ -193,9 +229,12 @@ public:
 			type = Pointer;
 			using RawObjectType = std::remove_pointer<ObjectType>::type;
 
-			auto typeInfo = std::make_unique<TypeInfo>();
-			underlyingType = std::move(typeInfo);
-			underlyingType->Init<RawObjectType>();
+			auto& typeInfoCollection = TypeInfoCollection::GetInstance();
+			if (!typeInfoCollection.IsTypeInfoRegistered<RawObjectType>())
+			{
+				typeInfoCollection.RegisterTypeInfo<RawObjectType>();
+			}
+			underlyingType = typeInfoCollection.GetTypeInfo<RawObjectType>();
 		}
 		else if (is_string<ObjectType>::value)
 		{
@@ -216,11 +255,16 @@ public:
 				objectDescId = objectFactory.GetObjectId<ObjectType>();
 			}
 		}
+
+		const std::string typeName = GetTypeName<ObjectType>();
 	}
 
 	Type type = Type::Undefined;
 	uintptr_t objectDescId = 0U;
-	std::unique_ptr<TypeInfo> underlyingType;
+	TypeInfo* underlyingType = nullptr;
+	std::string m_name;
+
+	friend class TypeInfoCollection;
 };
 
 template<typename T>
@@ -485,6 +529,48 @@ DeallocateValue(void* data)
 {
 }
 
+TypeInfoCollection& TypeInfoCollection::GetInstance()
+{
+	static TypeInfoCollection typeInfoCollection;
+	return typeInfoCollection;
+}
+
+template<typename T>
+TypeInfo* TypeInfoCollection::RegisterTypeInfo()
+{
+	const auto typeName = GetTypeName<T>();
+	auto& typeInfo = m_typeInfos[typeName];
+	typeInfo.Init<T>();
+	typeInfo.m_name = typeName;
+
+	return &typeInfo;
+}
+
+template<typename T>
+TypeInfo* TypeInfoCollection::GetTypeInfo()
+{
+	const auto typeName = GetTypeName<T>();
+	auto findResult = m_typeInfos.find(typeName);
+	assert(findResult != m_typeInfos.end());
+
+	return &(findResult->second);
+}
+
+TypeInfo* TypeInfoCollection::GetTypeInfo(const std::string& typeName)
+{
+	auto findResult = m_typeInfos.find(typeName);
+	assert(findResult != m_typeInfos.end());
+
+	return &(findResult->second);
+}
+
+template<typename T>
+bool TypeInfoCollection::IsTypeInfoRegistered() const
+{
+	const auto typeName = GetTypeName<T>();
+	auto findResult = m_typeInfos.find(typeName);
+	return findResult != m_typeInfos.end();
+}
 
 #endif // !TYPE_INFO_INCLUDE
 

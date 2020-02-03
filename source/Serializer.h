@@ -62,20 +62,12 @@ public:
 		DeserializeInternal(objectDesc, objectRawPtr);
 	}
 
-	void SerializePointers()
+	virtual void SerializePointers()
 	{
-		for (auto& it : m_pointersToSerialize)
-		{
-			auto addr = it.first;
-			auto typeInfo = it.second;
+	}
 
-			auto& factoryInstance = ObjectFactory::GetInstance();
-			const auto id = typeInfo->GetObjectDescId();
-
-			const auto& childObjectDesc = factoryInstance.GetObjectDesc(id);
-			SerializeInternal(childObjectDesc, addr);
-		}
-		m_pointersToSerialize.clear();
+	virtual void DeserializePointers()
+	{
 	}
 
 protected:
@@ -84,6 +76,8 @@ protected:
 
 	std::unordered_map<void*, TypeInfo*> m_pointersToSerialize;
 	std::set<void*> m_serializedPointers;
+
+	std::unordered_map<uintptr_t, std::vector<void*>> m_pointersToDeserialize;
 };
 
 #endif

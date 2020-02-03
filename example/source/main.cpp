@@ -10,7 +10,10 @@
 class JsonSerializer : public Serializer
 {
 public:
-	JsonSerializer(const std::string& filePath) : m_filePath(filePath) {}
+	JsonSerializer(const std::string& filePath) : m_filePath(filePath) 
+	{
+		m_currentValue = &m_root;
+	}
 
 	void Clear()
 	{
@@ -24,12 +27,87 @@ private:
 	Json::Value m_root;
 	Json::Value* m_currentValue;
 
+public:
+	void SerializePointers() override
+	{
+		Json::Value pointersValue;
+		for (auto& it : m_pointersToSerialize)
+		{
+			Json::Value objectValue;
+			auto valueAddress = it.first;
+			auto typeInfo = it.second;
+
+			objectValue["address"] = reinterpret_cast<uintptr_t>(valueAddress);
+			objectValue["type"] = typeInfo->GetName();
+			auto temp = m_currentValue;
+
+			Json::Value value;
+			m_currentValue = &value;
+
+			SerializeByType(*typeInfo, valueAddress);
+			objectValue["value"] = value;
+
+			pointersValue.append(objectValue);
+
+			m_currentValue = temp;
+		}
+		m_pointersToSerialize.clear();
+
+		m_root["pointers"] = pointersValue;
+	}
+
+	void DeserializePointers() override
+	{
+		Json::Value pointersValue = m_root["pointers"];
+
+		auto& typeInfoCollection = TypeInfoCollection::GetInstance();
+
+		for (auto it = pointersValue.begin(); it != pointersValue.end(); ++it)
+		{
+			const bool hasAddress = it->isMember("address");
+			const bool hasType = it->isMember("type");
+			const bool hasValue = it->isMember("value");
+			if (hasAddress && hasType)
+			{
+				const uintptr_t v = (*it)["address"].asUInt64();
+				const auto typeName = (*it)["type"].asString();
+				Json::Value value = (*it)["value"];
+
+				auto findIt = m_pointersToDeserialize.find(v);
+				if (findIt != m_pointersToDeserialize.end())
+				{
+					auto typeInfo = typeInfoCollection.GetTypeInfo(typeName);
+					auto actualData = findIt->second;
+
+					void* valueBuffer = nullptr;
+					size_t bufferSize = 0U;
+
+					auto temp = m_currentValue;
+					m_currentValue = &value;
+					typeInfo->createDefaultValue(valueBuffer, bufferSize);
+
+					DeserializeByType(*typeInfo, valueBuffer);
+				
+					m_currentValue = temp;
+
+					for (auto dataAddress : actualData)
+					{
+						*reinterpret_cast<void**>(dataAddress) = valueBuffer;
+					}
+
+					typeInfo->deleteValue(valueBuffer);
+				}
+			}
+		}
+	}
+
 protected:
 	void SerializeInternal(const ObjectDesc& objectDesc, void* object) override final
 	{
 		Json::Value objectValue;
 		const auto& properties = objectDesc.GetProperties();
 
+		auto currentRoot = m_currentValue;
 		for (const auto prop : properties)
 		{
 			const auto& typeInfo = prop.second->GetTypeInfo();
@@ -42,13 +120,14 @@ protected:
 
 			objectValue[prop.first] = propertyValue;
 		}
-
-		m_root[objectDesc.GetName()] = objectValue;
+		(*currentRoot)[objectDesc.GetName()] = objectValue;
+		m_currentValue = currentRoot;
 	}
 
 	void DeserializeInternal(const ObjectDesc& objectDesc, void* object) override final
 	{
-		Json::Value child = m_root[objectDesc.GetName()];
+		auto currentRoot = m_currentValue;
+		Json::Value child = (*currentRoot)[objectDesc.GetName()];
 
 		const auto& properties = objectDesc.GetProperties();
 
@@ -68,6 +147,7 @@ protected:
 				prop.second->SetValue(object, data);
 			}
 		}
+		m_currentValue = currentRoot;
 	}
 
 	void SerializeByType(const TypeInfo& typeInfo, void* data)
@@ -132,21 +212,22 @@ protected:
 			break;
 		case TypeInfo::Pointer:
 		{
-			
-			/*void* actualPtr = *reinterpret_cast<void**>(data);
+			void* actualPtr = *reinterpret_cast<void**>(data);
 			if (actualPtr != nullptr)
 			{
 				const bool isNotSerializedYet = m_serializedPointers.find(actualPtr) == m_serializedPointers.end();
 				if (isNotSerializedYet)
 				{
-					auto& underlyingTypeInfo = typeInfo.underlyingType;
-					m_pointersToSerialize[actualPtr] = underlyingTypeInfo.get();
+					auto underlyingTypeInfo = typeInfo.underlyingType;
+					m_pointersToSerialize[actualPtr] = underlyingTypeInfo;
 				}
 				else
 				{
-
+					// Do nothing. Everything is ready
 				}
-			}*/
+
+				*m_currentValue = reinterpret_cast<uintptr_t>(actualPtr);
+			}
 		}
 			break;
 		case TypeInfo::Array:
@@ -265,15 +346,11 @@ protected:
 			auto str = reinterpret_cast<std::string*>(data);
 			(*str) = m_currentValue->asString();
 		}
+		break;
 		case TypeInfo::Pointer:
 		{
-			/*std::cout << " Type: [Pointer] Value:" << std::endl;
-			void* actualPtr = *reinterpret_cast<void**>(data);
-			if (actualPtr != nullptr)
-			{
-				const auto& underlyingTypeInfo = typeInfo.GetUnderlyingType();
-				SerializeByType(*underlyingTypeInfo, actualPtr);
-			}*/
+			uintptr_t v = m_currentValue->asUInt64();
+			m_pointersToDeserialize[v].push_back(data);
 		}
 		break;
 		case TypeInfo::Array:
@@ -373,6 +450,9 @@ public:
 struct TestStruct
 {
 	int intValue = 5;
+
+	int GetValue() const { return intValue; }
+	void SetValue(const int val) { intValue = val; }
 	float floatValue = 7.0f;
 	int someArray[5] = { 1, 4, 5, 8, 9 };
 	int someMatrix[3][3] = { {1, 2, 3}, {3, 3, 3}, {6, 6, 6} };
@@ -389,6 +469,18 @@ struct TestStruct
 	void SetVec3(const Vec3& value) { privateVec3 = value; }
 };
 
+struct TestStruct2
+{
+	int intVal = 1;
+	Vec2* vec2 = nullptr;
+};
+
+struct TestStruct3
+{
+	float floatVal = 9.0f;
+	Vec2* vec2 = nullptr;
+};
+
 int main()
 {
 	class_<Vec2>("Vec2")
@@ -401,7 +493,7 @@ int main()
 		.AddProperty("z", &Vec3::z);
 
 	class_<TestStruct>("TestStruct")
-		.AddProperty("intValue", &TestStruct::intValue)
+		.AddProperty("intValue", &TestStruct::GetValue, &TestStruct::SetValue)
 		.AddProperty("floatValue", &TestStruct::floatValue)
 		.AddProperty("someArray", &TestStruct::someArray)
 		.AddProperty("someStaticArray", &TestStruct::someStaticArray)
@@ -413,6 +505,16 @@ int main()
 		.AddProperty("someEnum", &TestStruct::someEnum)
 		.AddProperty("someString", &TestStruct::someString)
 		.AddProperty("Vec3Accessor", &TestStruct::GetVec3, &TestStruct::SetVec3)
+		;
+
+	class_<TestStruct2>("TestStruct2")
+		.AddProperty("intValue", &TestStruct2::intVal)
+		.AddProperty("vec2", &TestStruct2::vec2)
+		;
+
+	class_<TestStruct3>("TestStruct3")
+		.AddProperty("floatValue", &TestStruct3::floatVal)
+		.AddProperty("vec2", &TestStruct3::vec2)
 		;
 
 	class_<BaseClass>("Base")
@@ -444,11 +546,25 @@ int main()
 
 	objectToSerialize_2.vec2 = vec2;
 
+	TestStruct2 objectOfTestStruct2, objectDesOfTestStruct2;
+	objectOfTestStruct2.vec2 = vec2;
+	objectOfTestStruct2.intVal = 999;
+
+	TestStruct3 objectOfTestStruct3, objectDesOfTestStruct3;
+	objectOfTestStruct3.vec2 = vec2;
+	objectOfTestStruct3.floatVal = 444.3f;
+
 	JsonSerializer serializer("test.json");
  	serializer.Serialize(objectToSerialize_1);
+	serializer.Serialize(objectOfTestStruct2);
+	serializer.Serialize(objectOfTestStruct3);
+	serializer.SerializePointers();
 
 	TestStruct objectToDeserialize;
 	serializer.Deserialize(objectToDeserialize);
+	serializer.Deserialize(objectDesOfTestStruct2);
+	serializer.Deserialize(objectDesOfTestStruct3);
+	serializer.DeserializePointers();
 
 	serializer.Clear();
 
