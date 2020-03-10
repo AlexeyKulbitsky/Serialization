@@ -25,6 +25,7 @@ set(SERIALIZATION_LIB_SRC
   source/Property.cpp
   source/ObjectFactory.cpp
   source/Serializer.cpp
+  source/TypeInfo.cpp
 )
 
 set(SERIALIZATION_LIB_SOURCE_FILES

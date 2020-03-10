@@ -70,11 +70,16 @@ public:
 	{
 	}
 
+	virtual void Clear()
+	{
+		m_serializedPointers.clear();
+	}
+
 protected:
 	virtual void SerializeInternal(const ObjectDesc& objectDesc, void* object) = 0;
 	virtual void DeserializeInternal(const ObjectDesc& objectDesc, void* object) = 0;
 
-	std::unordered_map<void*, TypeInfo*> m_pointersToSerialize;
+	std::unordered_map<void*, const TypeInfo*> m_pointersToSerialize;
 	std::set<void*> m_serializedPointers;
 
 	std::unordered_map<uintptr_t, std::vector<void*>> m_pointersToDeserialize;

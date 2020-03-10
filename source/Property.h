@@ -26,7 +26,7 @@ public:
 	}
 
 protected:
-	TypeInfo* m_typeInfo = nullptr;
+	const TypeInfo* m_typeInfo = nullptr;
 
 private:
     std::string m_name = "";

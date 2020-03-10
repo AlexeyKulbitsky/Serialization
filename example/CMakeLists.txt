@@ -5,11 +5,17 @@ project (SerializationExample)
 set(SERIALIZATION_PROJECT_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/source)
 set(EXAMPLE_PROJECT_NAME Example)
 
+set(EXAMPLE_APP_INCLUDE
+  source/JsonSerializer.h
+)
+
 set(EXAMPLE_APP_SRC
+  source/JsonSerializer.cpp
   source/main.cpp
 )
 
 set(EXAMPLE_APP_SOURCE_FILES
+  ${EXAMPLE_APP_INCLUDE}
   ${EXAMPLE_APP_SRC}
 )
 

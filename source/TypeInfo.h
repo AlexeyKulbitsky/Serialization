@@ -9,6 +9,7 @@
 #include <functional>
 #include <cstdint>
 #include <cassert>
+#include <typeinfo>
 
 template<size_t index>
 using TypeId_ = std::integral_constant<size_t, index>;
@@ -51,21 +52,6 @@ REGISTER_BASIC_TYPE(uint64_t, 8, sizeof(uint64_t))
 REGISTER_BASIC_TYPE(float, 9, sizeof(float))
 REGISTER_BASIC_TYPE(double, 10, sizeof(double))
 
-template <typename T>
-struct GetTypeNameHelper
-{
-	static std::string GetTypeName()
-	{
-		return std::string(__FUNCTION__);
-	}
-};
-
-template <typename T>
-std::string GetTypeName()
-{
-	return GetTypeNameHelper<T>::GetTypeName();
-}
-
 enum BasicType
 {
 	BT_INT_8 = 1,
@@ -99,6 +85,9 @@ public:
 	template<typename T>
 	TypeInfo* GetTypeInfo();
 
+	template<typename T>
+	TypeInfo* GetOrRegisterTypeInfo();
+
 	TypeInfo* GetTypeInfo(const std::string& typeName);
 
 	template<typename T>
@@ -110,6 +99,7 @@ private:
 class TypeInfo
 {
 public:
+
 	enum Type
 	{
 		Fundamental,
@@ -134,8 +124,8 @@ public:
 
 	struct FundamentalTypeParams
 	{
-		size_t typeSize;
-		size_t typeIndex;
+		size_t typeSize = 0U;
+		size_t typeIndex = 0U;
 	} fundamentalTypeParams;
 
 	struct ArrayParams
@@ -144,12 +134,12 @@ public:
 		using ItemGetter = std::function<void*(void*, const size_t)>;
 		using SizeSetter = std::function<void(void*, size_t)>;
 
-		SizeGetter getSize;
-		ItemGetter getItem;
-		SizeSetter setSize;
+		SizeGetter getSize = nullptr;
+		ItemGetter getItem = nullptr;
+		SizeSetter setSize = nullptr;
 
-		ArrayType arrayType;
-		std::unique_ptr<TypeInfo> elementTypeInfo;
+		ArrayType arrayType = ArrayType::Undefined;
+		TypeInfo* elementTypeInfo = nullptr;
 		// For C-style and static arrays
 		size_t elementsCount = 0U;
 
@@ -165,18 +155,28 @@ public:
 		using IteratorIncrementator = std::function<void(void*)>;
 		using KeyValueSetter = std::function<void(void*, void*, void*)>;
 
-		std::unique_ptr<TypeInfo> keyTypeInfo;
-		std::unique_ptr<TypeInfo> valueTypeInfo;
+		TypeInfo* keyTypeInfo = nullptr;
+		TypeInfo* valueTypeInfo = nullptr;
 
-		SizeGetter getSize;
-		IteratorGetter getIterator;
-		KeyGetter getKey;
-		ValueGetter getValue;
-		IteratorValidator isIteratorValid;
-		IteratorIncrementator incrementIterator;
-		KeyValueSetter setKeyValue;
+		SizeGetter getSize = nullptr;
+		IteratorGetter getIterator = nullptr;
+		KeyGetter getKey = nullptr;
+		ValueGetter getValue = nullptr;
+		IteratorValidator isIteratorValid = nullptr;
+		IteratorIncrementator incrementIterator = nullptr;
+		KeyValueSetter setKeyValue = nullptr;
 
 	} mapParams;
+
+	struct PointerParams
+	{
+		using ActualTypeInfoGetter= std::function<const TypeInfo*(void*)>;
+
+		TypeInfo* underlyingType = nullptr;
+
+		ActualTypeInfoGetter getActualTypeInfo = nullptr;
+
+	} pointerParams;
 
 	const uintptr_t GetObjectDescId() const { return objectDescId; }
 	std::function<void(void*&, size_t&)> createDefaultValue;
@@ -232,9 +232,13 @@ public:
 			auto& typeInfoCollection = TypeInfoCollection::GetInstance();
 			if (!typeInfoCollection.IsTypeInfoRegistered<RawObjectType>())
 			{
-				typeInfoCollection.RegisterTypeInfo<RawObjectType>();
+				pointerParams.underlyingType = typeInfoCollection.RegisterTypeInfo<RawObjectType>();
+				pointerParams.underlyingType->pointerParams.getActualTypeInfo = GetTypeInfo<RawObjectType>;
 			}
-			underlyingType = typeInfoCollection.GetTypeInfo<RawObjectType>();
+			else
+			{
+				pointerParams.underlyingType = typeInfoCollection.GetTypeInfo<RawObjectType>();
+			}
 		}
 		else if (is_string<ObjectType>::value)
 		{
@@ -256,12 +260,11 @@ public:
 			}
 		}
 
-		const std::string typeName = GetTypeName<ObjectType>();
+		const std::string typeName = typeid(ObjectType).name();
 	}
 
 	Type type = Type::Undefined;
 	uintptr_t objectDescId = 0U;
-	TypeInfo* underlyingType = nullptr;
 	std::string m_name;
 
 	friend class TypeInfoCollection;
@@ -316,13 +319,12 @@ struct TypeFiller<T, std::enable_if_t<is_vector<T>::value>>
 {
 	static void Fill(TypeInfo& typeInfo)
 	{
-		typeInfo.arrayParams.elementTypeInfo = std::make_unique<TypeInfo>();
 		typeInfo.arrayParams.getSize = VectorSizeGetter<T>;
 		typeInfo.arrayParams.getItem = VectorItemGetter<T>;
 		typeInfo.arrayParams.setSize = VectorSizeSetter<T>;
 
 		using ElementType = remove_vector_extent<T>::type;
-		typeInfo.arrayParams.elementTypeInfo->Init<ElementType>();
+		typeInfo.arrayParams.elementTypeInfo = TypeInfoCollection::GetInstance().GetOrRegisterTypeInfo<ElementType>();
 	}
 };
 
@@ -350,8 +352,7 @@ struct TypeFiller<T, std::enable_if_t<is_static_array<T>::value>>
 		typeInfo.arrayParams.getItem = StaticArrayItemGetter<ElementType, ArraySize<T>::size>;
 		typeInfo.arrayParams.elementsCount = ArraySize<T>::size;
 
-		typeInfo.arrayParams.elementTypeInfo = std::make_unique<TypeInfo>();
-		typeInfo.arrayParams.elementTypeInfo->Init<ElementType>();
+		typeInfo.arrayParams.elementTypeInfo = TypeInfoCollection::GetInstance().GetOrRegisterTypeInfo<ElementType>();
 	}
 };
 
@@ -364,8 +365,7 @@ struct TypeFiller<T, std::enable_if_t<std::is_array<T>::value>>
 		typeInfo.arrayParams.getItem = ArrayItemGetter<ElementType>;
 		typeInfo.arrayParams.elementsCount = ArraySize<T>::size;	
 
-		typeInfo.arrayParams.elementTypeInfo = std::make_unique<TypeInfo>();
-		typeInfo.arrayParams.elementTypeInfo->Init<ElementType>();
+		typeInfo.arrayParams.elementTypeInfo = TypeInfoCollection::GetInstance().GetOrRegisterTypeInfo<ElementType>();
 	}
 };
 
@@ -481,10 +481,9 @@ struct TypeFiller<T, std::enable_if_t<is_map<T>::value>>
 		typeInfo.mapParams.incrementIterator = MapIteratorIncrementator<MapType>;
 		typeInfo.mapParams.setKeyValue = MapKeyValueSetter<MapType, KeyType, ValueType>;
 
-		typeInfo.mapParams.keyTypeInfo = std::make_unique<TypeInfo>();
-		typeInfo.mapParams.keyTypeInfo->Init<KeyType>();
-		typeInfo.mapParams.valueTypeInfo = std::make_unique<TypeInfo>();
-		typeInfo.mapParams.valueTypeInfo->Init<ValueType>();
+		auto& typeInfoCollection = TypeInfoCollection::GetInstance();
+		typeInfo.mapParams.keyTypeInfo = typeInfoCollection.GetOrRegisterTypeInfo<KeyType>();
+		typeInfo.mapParams.valueTypeInfo = typeInfoCollection.GetOrRegisterTypeInfo<ValueType>();
 	}
 };
 
@@ -529,16 +528,10 @@ DeallocateValue(void* data)
 {
 }
 
-TypeInfoCollection& TypeInfoCollection::GetInstance()
-{
-	static TypeInfoCollection typeInfoCollection;
-	return typeInfoCollection;
-}
-
 template<typename T>
 TypeInfo* TypeInfoCollection::RegisterTypeInfo()
 {
-	const auto typeName = GetTypeName<T>();
+	const auto typeName = typeid(T).name();
 	auto& typeInfo = m_typeInfos[typeName];
 	typeInfo.Init<T>();
 	typeInfo.m_name = typeName;
@@ -549,15 +542,7 @@ TypeInfo* TypeInfoCollection::RegisterTypeInfo()
 template<typename T>
 TypeInfo* TypeInfoCollection::GetTypeInfo()
 {
-	const auto typeName = GetTypeName<T>();
-	auto findResult = m_typeInfos.find(typeName);
-	assert(findResult != m_typeInfos.end());
-
-	return &(findResult->second);
-}
-
-TypeInfo* TypeInfoCollection::GetTypeInfo(const std::string& typeName)
-{
+	const auto typeName = typeid(T).name();
 	auto findResult = m_typeInfos.find(typeName);
 	assert(findResult != m_typeInfos.end());
 
@@ -565,11 +550,38 @@ TypeInfo* TypeInfoCollection::GetTypeInfo(const std::string& typeName)
 }
 
 template<typename T>
+TypeInfo* TypeInfoCollection::GetOrRegisterTypeInfo()
+{
+	const auto typeName = typeid(T).name();
+	auto findResult = m_typeInfos.find(typeName);
+	if (findResult != m_typeInfos.end())
+	{
+		return &(findResult->second);
+	}
+	else
+	{
+		auto& typeInfo = m_typeInfos[typeName];
+		typeInfo.Init<T>();
+		typeInfo.m_name = typeName;
+
+		return &typeInfo;
+	}
+}
+
+template<typename T>
 bool TypeInfoCollection::IsTypeInfoRegistered() const
 {
-	const auto typeName = GetTypeName<T>();
+	const auto typeName = typeid(T).name();
 	auto findResult = m_typeInfos.find(typeName);
 	return findResult != m_typeInfos.end();
+}
+
+template<typename T>
+TypeInfo* GetTypeInfo(void* rawObject)
+{
+	T* object = reinterpret_cast<T*>(rawObject);
+	const std::string typeName = typeid(*object).name();
+	return TypeInfoCollection::GetInstance().GetTypeInfo(typeName);
 }
 
 #endif // !TYPE_INFO_INCLUDE

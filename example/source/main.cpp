@@ -1,430 +1,39 @@
-#include "ObjectFactory.h"
-#include "Serializer.h"
-#include "TypeInfo.h"
+#include "JsonSerializer.h"
 
 #include <iostream>
 
-#include <json/json.h>
-
-
-class JsonSerializer : public Serializer
+template<typename T>
+struct Getter
 {
-public:
-	JsonSerializer(const std::string& filePath) : m_filePath(filePath) 
+	static std::string Get()
 	{
-		m_currentValue = &m_root;
-	}
-
-	void Clear()
-	{
-		Json::StreamWriterBuilder builder;
-		const std::unique_ptr<Json::StreamWriter> writer(builder.newStreamWriter());
-		writer->write(m_root, &std::cout);
-	}
-
-private:
-	std::string m_filePath;
-	Json::Value m_root;
-	Json::Value* m_currentValue;
-
-public:
-	void SerializePointers() override
-	{
-		Json::Value pointersValue;
-		for (auto& it : m_pointersToSerialize)
-		{
-			Json::Value objectValue;
-			auto valueAddress = it.first;
-			auto typeInfo = it.second;
-
-			objectValue["address"] = reinterpret_cast<uintptr_t>(valueAddress);
-			objectValue["type"] = typeInfo->GetName();
-			auto temp = m_currentValue;
-
-			Json::Value value;
-			m_currentValue = &value;
-
-			SerializeByType(*typeInfo, valueAddress);
-			objectValue["value"] = value;
-
-			pointersValue.append(objectValue);
-
-			m_currentValue = temp;
-		}
-		m_pointersToSerialize.clear();
-
-		m_root["pointers"] = pointersValue;
-	}
-
-	void DeserializePointers() override
-	{
-		Json::Value pointersValue = m_root["pointers"];
-
-		auto& typeInfoCollection = TypeInfoCollection::GetInstance();
-
-		for (auto it = pointersValue.begin(); it != pointersValue.end(); ++it)
-		{
-			const bool hasAddress = it->isMember("address");
-			const bool hasType = it->isMember("type");
-			const bool hasValue = it->isMember("value");
-			if (hasAddress && hasType)
-			{
-				const uintptr_t v = (*it)["address"].asUInt64();
-				const auto typeName = (*it)["type"].asString();
-				Json::Value value = (*it)["value"];
-
-				auto findIt = m_pointersToDeserialize.find(v);
-				if (findIt != m_pointersToDeserialize.end())
-				{
-					auto typeInfo = typeInfoCollection.GetTypeInfo(typeName);
-					auto actualData = findIt->second;
-
-					void* valueBuffer = nullptr;
-					size_t bufferSize = 0U;
-
-					auto temp = m_currentValue;
-					m_currentValue = &value;
-					typeInfo->createDefaultValue(valueBuffer, bufferSize);
-
-					DeserializeByType(*typeInfo, valueBuffer);
-				
-					m_currentValue = temp;
-
-					for (auto dataAddress : actualData)
-					{
-						*reinterpret_cast<void**>(dataAddress) = valueBuffer;
-					}
-
-					typeInfo->deleteValue(valueBuffer);
-				}
-			}
-		}
-	}
-
-protected:
-	void SerializeInternal(const ObjectDesc& objectDesc, void* object) override final
-	{
-		Json::Value objectValue;
-		const auto& properties = objectDesc.GetProperties();
-
-		auto currentRoot = m_currentValue;
-		for (const auto prop : properties)
-		{
-			const auto& typeInfo = prop.second->GetTypeInfo();
-			void* data = prop.second->GetValue(object);
-
-			Json::Value propertyValue;
-			m_currentValue = &propertyValue;
-
-			SerializeByType(typeInfo, data);
-
-			objectValue[prop.first] = propertyValue;
-		}
-		(*currentRoot)[objectDesc.GetName()] = objectValue;
-		m_currentValue = currentRoot;
-	}
-
-	void DeserializeInternal(const ObjectDesc& objectDesc, void* object) override final
-	{
-		auto currentRoot = m_currentValue;
-		Json::Value child = (*currentRoot)[objectDesc.GetName()];
-
-		const auto& properties = objectDesc.GetProperties();
-
-		for (const auto prop : properties)
-		{
-			const auto& typeInfo = prop.second->GetTypeInfo();
-			void* data = prop.second->GetValue(object);
-
-			const bool isMember = child.isMember(prop.first);
-			if (isMember)
-			{
-				Json::Value propertyValue = child[prop.first];
-				m_currentValue = &propertyValue;
-
-				DeserializeByType(typeInfo, data);
-
-				prop.second->SetValue(object, data);
-			}
-		}
-		m_currentValue = currentRoot;
-	}
-
-	void SerializeByType(const TypeInfo& typeInfo, void* data)
-	{
-		switch (typeInfo.type)
-		{
-		case TypeInfo::Fundamental:
-		case TypeInfo::Enum:
-		{
-			const auto typeIndex = typeInfo.fundamentalTypeParams.typeIndex;
-
-			switch (typeIndex)
-			{
-			case BT_INT_32:
-				*m_currentValue = *(reinterpret_cast<int*>(data));
-				break;
-			case BT_FLOAT:
-				*m_currentValue = *(reinterpret_cast<float*>(data));
-				break;
-			case BT_DOUBLE:
-				*m_currentValue = *(reinterpret_cast<double*>(data));
-				break;
-			default:
-				*m_currentValue = "none";
-				break;
-			}
-		}
-			break;
-		case TypeInfo::Class:
-		{
-			auto& factoryInstance = ObjectFactory::GetInstance();
-			const auto id = typeInfo.GetObjectDescId();
-
-			const auto& childObjectDesc = factoryInstance.GetObjectDesc(id);
-
-			auto temp = m_currentValue;
-
-			Json::Value objectValue;
-			const auto& childProperties = childObjectDesc.GetProperties();
-
-			for (const auto childProp : childProperties)
-			{
-				const auto& propertyTypeInfo = childProp.second->GetTypeInfo();
-				void* childData = childProp.second->GetValue(data);
-
-				Json::Value propertyValue;
-				m_currentValue = &propertyValue;
-
-				SerializeByType(propertyTypeInfo, childData);
-
-				objectValue[childProp.first] = propertyValue;
-			}
-
-			(*temp) = objectValue;
-		}
-			break;
-		case TypeInfo::String:
-		{
-			auto str = reinterpret_cast<std::string*>(data);
-			*m_currentValue = (*str);
-		}
-			break;
-		case TypeInfo::Pointer:
-		{
-			void* actualPtr = *reinterpret_cast<void**>(data);
-			if (actualPtr != nullptr)
-			{
-				const bool isNotSerializedYet = m_serializedPointers.find(actualPtr) == m_serializedPointers.end();
-				if (isNotSerializedYet)
-				{
-					auto underlyingTypeInfo = typeInfo.underlyingType;
-					m_pointersToSerialize[actualPtr] = underlyingTypeInfo;
-				}
-				else
-				{
-					// Do nothing. Everything is ready
-				}
-
-				*m_currentValue = reinterpret_cast<uintptr_t>(actualPtr);
-			}
-		}
-			break;
-		case TypeInfo::Array:
-		{
-			size_t elementsCount = 0U;
-			const auto& elementTypeInfo = typeInfo.arrayParams.elementTypeInfo;
-
-			if (typeInfo.arrayParams.arrayType == TypeInfo::ArrayType::Vector)
-			{
-				elementsCount = typeInfo.arrayParams.getSize(data);
-			}
-			else
-			{
-				elementsCount = typeInfo.arrayParams.elementsCount;
-			} 
-
-			auto temp = m_currentValue;
-			for (size_t i = 0U; i < elementsCount; ++i)
-			{
-				Json::Value itemValue;
-				m_currentValue = &itemValue;
-				void* currentDataAddress = typeInfo.arrayParams.getItem(data, i);
-				SerializeByType(*elementTypeInfo, currentDataAddress);
-				temp->append(itemValue);
-			}
-			m_currentValue = temp;
-		}
-			break;
-		case TypeInfo::Map:
-		{
-			auto it = typeInfo.mapParams.getIterator(data);
-			auto temp = m_currentValue;
-			while (typeInfo.mapParams.isIteratorValid(it, data))
-			{
-				Json::Value itemValue;
-				Json::Value keyValue;
-				Json::Value valueValue;
-
-				m_currentValue = &keyValue;
-				auto key = typeInfo.mapParams.getKey(it);
-				SerializeByType(*typeInfo.mapParams.keyTypeInfo, (void*)key);
-
-				m_currentValue = &valueValue;
-				auto value = typeInfo.mapParams.getValue(it);
-				SerializeByType(*typeInfo.mapParams.valueTypeInfo, value);
-
-				typeInfo.mapParams.incrementIterator(it);
-
-				itemValue["key"] = keyValue;
-				itemValue["value"] = valueValue;
-				temp->append(itemValue);
-			}
-			m_currentValue = temp;
-		}
-			break;
-		default:
-			break;
-		}
-	}
-
-	void DeserializeByType(const TypeInfo& typeInfo, void* data)
-	{
-		switch (typeInfo.type)
-		{
-		case TypeInfo::Fundamental:
-		case TypeInfo::Enum:
-		{
-			const auto typeIndex = typeInfo.fundamentalTypeParams.typeIndex;
-
-			switch (typeIndex)
-			{
-			case BT_INT_32:
-				*(reinterpret_cast<int*>(data)) = m_currentValue->asInt();
-				break;
-			case BT_FLOAT:
-				*(reinterpret_cast<float*>(data)) = m_currentValue->asFloat();
-				break;
-			case BT_DOUBLE:
-				break;
-			default:
-				break;
-			}
-		}
-		break;
-		case TypeInfo::Class:
-		{
-			auto& factoryInstance = ObjectFactory::GetInstance();
-			const auto id = typeInfo.GetObjectDescId();
-
-			const auto& childObjectDesc = factoryInstance.GetObjectDesc(id);
-
-			const auto& childProperties = childObjectDesc.GetProperties();
-
-			auto child = m_currentValue;
-
-			for (const auto childProp : childProperties)
-			{
-				const auto& childTypeInfo = childProp.second->GetTypeInfo();
-				void* childData = childProp.second->GetValue(data);
-
-				const bool isMember = (*child).isMember(childProp.first);
-				if (isMember)
-				{
-					Json::Value propertyValue = (*child)[childProp.first];
-					m_currentValue = &propertyValue;
-
-					DeserializeByType(childTypeInfo, childData);
-
-					childProp.second->SetValue(data, childData);
-				}
-			}
-		}
-		break;
-		case TypeInfo::String:
-		{
-			auto str = reinterpret_cast<std::string*>(data);
-			(*str) = m_currentValue->asString();
-		}
-		break;
-		case TypeInfo::Pointer:
-		{
-			uintptr_t v = m_currentValue->asUInt64();
-			m_pointersToDeserialize[v].push_back(data);
-		}
-		break;
-		case TypeInfo::Array:
-		{
-			const auto elementsCount = m_currentValue->size();
-			const auto& underlyingTypeInfo = typeInfo.arrayParams.elementTypeInfo;
-
-			if (typeInfo.arrayParams.arrayType == TypeInfo::ArrayType::Vector)
-			{
-				typeInfo.arrayParams.setSize(data, elementsCount);
-			}
-
-			auto temp = m_currentValue;
-			for (size_t i = 0U; i < elementsCount; ++i)
-			{
-				Json::Value itemValue = (*temp)[i];
-				m_currentValue = &itemValue;
-
-				void* currentDataAddress = typeInfo.arrayParams.getItem(data, i);
-				DeserializeByType(*underlyingTypeInfo, reinterpret_cast<void*>(currentDataAddress));
-			}
-			m_currentValue = temp;
-		}
-		break;
-		case TypeInfo::Map:
-		{
-			const auto elementsCount = m_currentValue->size();
-
-			void* keyBuffer = nullptr;
-			void* valueBuffer = nullptr;
-			size_t keyBufferSize = 0U;
-			size_t valueBufferSize = 0U;
-
-			typeInfo.mapParams.keyTypeInfo->createDefaultValue(keyBuffer, keyBufferSize);
-			typeInfo.mapParams.valueTypeInfo->createDefaultValue(valueBuffer, valueBufferSize);
-
-			auto& keyContainer = ObjectFactory::GetInstance().GetTempContainer(0U);
-			auto& valueContainer = ObjectFactory::GetInstance().GetTempContainer(1U);
-
-			auto temp = m_currentValue;
-			for (size_t i = 0U; i < elementsCount; ++i)
-			{
-				Json::Value itemValue = (*temp)[i];
-
-				m_currentValue = &itemValue["key"];
-				DeserializeByType(*typeInfo.mapParams.keyTypeInfo, keyBuffer);
-
-				m_currentValue = &itemValue["value"];
-				DeserializeByType(*typeInfo.mapParams.valueTypeInfo, valueBuffer);
-
-				typeInfo.mapParams.setKeyValue(data, keyBuffer, valueBuffer);
-			}
-			m_currentValue = temp;
-			typeInfo.mapParams.keyTypeInfo->deleteValue(keyBuffer);
-			typeInfo.mapParams.valueTypeInfo->deleteValue(valueBuffer);
-		}
-		break;
-		default:
-			break;
-		}
+		return std::string(__FUNCTION__);
 	}
 };
 
-struct Vec2
+struct Vec
+{
+	virtual ~Vec() {}
+};
+
+struct Vec1 : Vec
 {
 	float x = 0.0f;
+};
+
+struct Vec2 : Vec1
+{
 	float y = 0.0f;
 };
 
-struct Vec3
+struct Vec3 : Vec2
 {
-    float x = 0.0f;
-    float y = 1.0f;
     float z = 2.3f;
+};
+
+struct Vec4 : Vec3
+{
+	float w = 0.0f;
 };
 
 enum class MyEnum
@@ -460,7 +69,7 @@ struct TestStruct
 	std::array<int, 3> someStaticArray;
 	std::map<std::string, float> someMap;
 	Vec3 vec3;
-	Vec2* vec2 = nullptr;
+	Vec* vec = nullptr;
 	MyEnum someEnum;
 	std::string someString;
 
@@ -483,14 +92,19 @@ struct TestStruct3
 
 int main()
 {
-	class_<Vec2>("Vec2")
-		.AddProperty("x", &Vec2::x)
+	class_<Vec>("Vec");
+
+	class_<Vec1, Vec>("Vec1")
+		.AddProperty("x", &Vec1::x);
+
+	class_<Vec2, Vec1>("Vec2")
 		.AddProperty("y", &Vec2::y);
 
-	class_<Vec3>("Vec3")
-		.AddProperty("x", &Vec3::x)
-		.AddProperty("y", &Vec3::y)
+	class_<Vec3, Vec2>("Vec3")
 		.AddProperty("z", &Vec3::z);
+
+	class_<Vec4, Vec3>("Vec4")
+		.AddProperty("w", &Vec4::w);
 
 	class_<TestStruct>("TestStruct")
 		.AddProperty("intValue", &TestStruct::GetValue, &TestStruct::SetValue)
@@ -501,7 +115,7 @@ int main()
 		.AddProperty("someVector", &TestStruct::someVector)
 		.AddProperty("vec3", &TestStruct::vec3)
 		.AddProperty("someMap", &TestStruct::someMap)
-		.AddProperty("vec2", &TestStruct::vec2)
+		.AddProperty("vec", &TestStruct::vec)
 		.AddProperty("someEnum", &TestStruct::someEnum)
 		.AddProperty("someString", &TestStruct::someString)
 		.AddProperty("Vec3Accessor", &TestStruct::GetVec3, &TestStruct::SetVec3)
@@ -526,9 +140,10 @@ int main()
 		.AddProperty("c", &DerivedClass::c)
 		;
 
-	Vec2* vec2 = new Vec2();
-	vec2->x = 555.7f;
-	vec2->y = 6.2f;
+	Vec3* vec3 = new Vec3();
+	vec3->x = 555.7f;
+	vec3->y = 6.2f;
+	vec3->z = 7777.0f;
 
 	TestStruct objectToSerialize_1, objectToSerialize_2;
 	objectToSerialize_1.intValue = 7;
@@ -542,16 +157,16 @@ int main()
 	objectToSerialize_1.someEnum = MyEnum::Second;
 	objectToSerialize_1.someString = "AAA";
 	objectToSerialize_1.vec3.z = 111.555f;
-	objectToSerialize_1.vec2 = vec2;
+	objectToSerialize_1.vec = vec3;
 
-	objectToSerialize_2.vec2 = vec2;
+	objectToSerialize_2.vec = vec3;
 
 	TestStruct2 objectOfTestStruct2, objectDesOfTestStruct2;
-	objectOfTestStruct2.vec2 = vec2;
+	objectOfTestStruct2.vec2 = vec3;
 	objectOfTestStruct2.intVal = 999;
 
 	TestStruct3 objectOfTestStruct3, objectDesOfTestStruct3;
-	objectOfTestStruct3.vec2 = vec2;
+	objectOfTestStruct3.vec2 = vec3;
 	objectOfTestStruct3.floatVal = 444.3f;
 
 	JsonSerializer serializer("test.json");
@@ -567,6 +182,8 @@ int main()
 	serializer.DeserializePointers();
 
 	serializer.Clear();
+
+	auto r = Getter<int>::Get();
 
     return 0;
 }
